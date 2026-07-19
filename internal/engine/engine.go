@@ -115,6 +115,7 @@ func RenderedFiles() map[string]string {
 
 const acmeLocation = `    location /.well-known/acme-challenge/ {
         proxy_pass http://127.0.0.1:` + ACMEPort + `;
+        proxy_set_header Host $host;
     }
 `
 
