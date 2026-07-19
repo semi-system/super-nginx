@@ -1,0 +1,6 @@
+# GO-2026-5932: golang.org/x/crypto/openpgp is unmaintained (no fix will ever
+# exist). False positive here: openpgp is NOT linked into the binary —
+# verified with `go list -deps ./cmd/super-nginx | grep openpgp` → no matches.
+# Trivy flags the whole x/crypto module from Go buildinfo, not actual packages.
+# Re-check if a future dependency starts importing openpgp for real.
+GO-2026-5932
