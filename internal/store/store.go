@@ -57,6 +57,7 @@ type MailListener struct {
 	Mode           string `json:"mode"`  // terminate | passthrough
 	DefaultBackend string `json:"default_backend"` // host:port, used when client sends no SNI
 	SNIRoute       bool   `json:"sni_route"`       // passthrough: route by SNI via ssl_preread
+	ProxySSL       bool   `json:"proxy_ssl"`       // terminate: re-encrypt to backend (backend on TLS port)
 	Enabled        bool   `json:"enabled"`
 }
 

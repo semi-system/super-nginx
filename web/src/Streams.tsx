@@ -9,7 +9,7 @@ export default function Streams() {
   const [edit, setEdit] = useState<StreamRule | null>(null)
   const { error, busy, run } = useAsync()
 
-  const reload = async () => setRules(await get('/api/v1/streams'))
+  const reload = async () => setRules((await get('/api/v1/streams')) ?? [])
   useEffect(() => {
     run(reload)
   }, [])

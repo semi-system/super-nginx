@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { get, post, put, del, MailListener, MailDomain, Cert } from './api'
 import { Err, Row, Check, useAsync } from './ui'
+import CertPicker from './CertPicker'
 
 const emptyListener: MailListener = {
   id: 0,
@@ -9,6 +10,7 @@ const emptyListener: MailListener = {
   mode: 'terminate',
   default_backend: '',
   sni_route: false,
+  proxy_ssl: false,
   enabled: true,
 }
 
@@ -23,9 +25,9 @@ export default function Mail() {
   const { error, busy, run } = useAsync()
 
   const reload = async () => {
-    setListeners(await get('/api/v1/mail/listeners'))
-    setDomains(await get('/api/v1/mail/domains'))
-    setCerts(await get('/api/v1/certs'))
+    setListeners((await get('/api/v1/mail/listeners')) ?? [])
+    setDomains((await get('/api/v1/mail/domains')) ?? [])
+    setCerts((await get('/api/v1/certs')) ?? [])
   }
   useEffect(() => {
     run(reload)
@@ -69,8 +71,9 @@ export default function Mail() {
       <p className="hint">
         Pure TCP/TLS proxy (nginx stream) — authentication stays on the backend mail server.
         Terminate mode ends TLS here with SNI per-domain certificates (implicit TLS: SMTPS 465,
-        IMAPS 993, POP3S 995). Plain/STARTTLS ports must use passthrough: the backend holds the
-        certificate there.
+        IMAPS 993, POP3S 995) and forwards plaintext, so the backend is its plain port (IMAP 143,
+        POP3 110, SMTP 25). Tick "re-encrypt" to instead forward TLS to the backend's TLS port
+        (993/995/465). Plain/STARTTLS-only ports use passthrough: the backend holds the cert.
       </p>
       <Err msg={error} />
 
@@ -111,16 +114,14 @@ export default function Mail() {
           <Row label="Backend (host:port)">
             <input value={editD.backend} onChange={(e) => setEditD({ ...editD, backend: e.target.value })} placeholder="10.0.0.5:465" />
           </Row>
-          <Row label="Certificate (for terminate listeners — can be the same cert an HTTPS host uses)">
-            <select value={editD.cert_id} onChange={(e) => setEditD({ ...editD, cert_id: +e.target.value })}>
-              <option value={0}>— none —</option>
-              {certs.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.domains.join(', ')})
-                </option>
-              ))}
-            </select>
-          </Row>
+          <CertPicker
+            label="Certificate (for terminate listeners — can be the same cert an HTTPS host uses)"
+            value={editD.cert_id}
+            certs={certs}
+            defaultDomains={editD.domain ? [editD.domain] : []}
+            onChange={(id) => setEditD({ ...editD, cert_id: id })}
+            onCertsChanged={setCerts}
+          />
           <div className="bar">
             <button type="submit" disabled={busy}>Save & apply</button>
             <button type="button" onClick={() => setEditD(null)}>Cancel</button>
@@ -190,6 +191,9 @@ export default function Mail() {
             <Check label="Enabled" checked={editL.enabled} onChange={(v) => setEditL({ ...editL, enabled: v })} />
             {editL.mode === 'passthrough' && (
               <Check label="Route by SNI (ssl_preread)" checked={editL.sni_route} onChange={(v) => setEditL({ ...editL, sni_route: v })} />
+            )}
+            {editL.mode === 'terminate' && (
+              <Check label="Re-encrypt to backend (proxy_ssl → backend TLS port e.g. 993)" checked={editL.proxy_ssl} onChange={(v) => setEditL({ ...editL, proxy_ssl: v })} />
             )}
           </div>
           <div className="bar">

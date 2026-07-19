@@ -7,6 +7,7 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
   const [staging, setStaging] = useState(false)
   const [oldPw, setOldPw] = useState('')
   const [newPw, setNewPw] = useState('')
+  const [backupPw, setBackupPw] = useState('')
   const [msg, setMsg] = useState('')
   const { error, busy, run } = useAsync()
 
@@ -69,26 +70,61 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
       <div className="editor">
         <h3>Backup & restore</h3>
         <p className="hint">
-          Backup = state + certificates + ACME account (tar.gz). Rendered config is regenerated on
-          restore.
+          Backup = data + certificates + ACME account, always encrypted (AES-256-GCM). With a
+          password it is portable — restore it anywhere with the same password. Without a password
+          it is encrypted with a per-instance key, so it restores only on this instance. Use the
+          same password to restore.
         </p>
+        <Row label="Backup password (optional)">
+          <input
+            type="password"
+            value={backupPw}
+            onChange={(e) => setBackupPw(e.target.value)}
+            placeholder="leave empty for per-instance key"
+          />
+        </Row>
         <div className="bar">
-          <a href="/api/v1/backup" download>
-            <button type="button">Download backup</button>
-          </a>
+          <button
+            type="button"
+            onClick={() =>
+              run(async () => {
+                const res = await fetch('/api/v1/backup', {
+                  method: 'POST',
+                  headers: { 'X-Backup-Password': backupPw },
+                })
+                if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
+                const blob = await res.blob()
+                const cd = res.headers.get('Content-Disposition') || ''
+                const name = /filename="([^"]+)"/.exec(cd)?.[1] || 'super-nginx-backup.snb'
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = name
+                a.click()
+                URL.revokeObjectURL(url)
+                setMsg('Backup downloaded')
+              })
+            }
+          >
+            Download backup
+          </button>
           <label>
             <input
               type="file"
-              accept=".gz,.tgz,application/gzip"
+              accept=".snb"
               style={{ display: 'none' }}
               onChange={(e) => {
                 const f = e.target.files?.[0]
-                if (!f || !confirm('Restore this backup? Current state will be replaced.')) return
+                if (!f || !confirm('Restore this backup? Current data will be replaced.')) return
                 run(async () => {
-                  const res = await fetch('/api/v1/restore', { method: 'POST', body: f })
+                  const res = await fetch('/api/v1/restore', {
+                    method: 'POST',
+                    headers: { 'X-Backup-Password': backupPw },
+                    body: f,
+                  })
                   const data = await res.json()
                   if (!res.ok) throw new Error(data.error || res.statusText)
-                  setMsg(`Restored ${data.files} files`)
+                  setMsg(`Restored (${data.files} cert files)`)
                 })
               }}
             />

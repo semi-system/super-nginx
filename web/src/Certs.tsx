@@ -17,7 +17,7 @@ export default function Certs() {
   const [provider, setProvider] = useState('')
   const [dnsEnv, setDnsEnv] = useState('')
 
-  const reload = async () => setCerts(await get('/api/v1/certs'))
+  const reload = async () => setCerts((await get('/api/v1/certs')) ?? [])
   useEffect(() => {
     run(reload)
   }, [])

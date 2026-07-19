@@ -65,6 +65,15 @@ func EnsureAdmin(st *store.Store) {
 
 // ---- plumbing ---------------------------------------------------------------
 
+// nonNil keeps empty lists as [] in JSON — nil slices marshal to null and
+// crash naive frontend .map calls.
+func nonNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
+}
+
 func jsonOut(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -302,7 +311,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	auth("PUT /api/v1/accesslists/{id}", a.updateAccessList)
 	auth("DELETE /api/v1/accesslists/{id}", a.deleteAccessList)
 
-	auth("GET /api/v1/backup", a.backup)
+	auth("POST /api/v1/backup", a.backup)
 	auth("POST /api/v1/restore", a.restore)
 	auth("GET /api/v1/audit", a.auditLog)
 	auth("GET /api/v1/metrics", a.metrics)
@@ -410,7 +419,7 @@ func (a *API) summary(w http.ResponseWriter, _ *http.Request) {
 		Expires time.Time `json:"expires"`
 		Error   string    `json:"error,omitempty"`
 	}
-	var certs []expiring
+	certs := []expiring{}
 	for _, c := range s.Certs {
 		certs = append(certs, expiring{c.Name, c.ExpiresAt, c.LastError})
 	}
@@ -451,7 +460,7 @@ func (a *API) putSettings(w http.ResponseWriter, r *http.Request) {
 func (a *API) listHosts(w http.ResponseWriter, _ *http.Request) {
 	a.St.Mu.Lock()
 	defer a.St.Mu.Unlock()
-	jsonOut(w, 200, a.St.S.Hosts)
+	jsonOut(w, 200, nonNil(a.St.S.Hosts))
 }
 
 func (a *API) createHost(w http.ResponseWriter, r *http.Request) {
@@ -518,7 +527,7 @@ func (a *API) deleteHost(w http.ResponseWriter, r *http.Request) {
 func (a *API) listCerts(w http.ResponseWriter, _ *http.Request) {
 	a.St.Mu.Lock()
 	defer a.St.Mu.Unlock()
-	jsonOut(w, 200, a.St.S.Certs)
+	jsonOut(w, 200, nonNil(a.St.S.Certs))
 }
 
 func (a *API) createCustomCert(w http.ResponseWriter, r *http.Request) {
@@ -636,7 +645,7 @@ func (a *API) deleteCert(w http.ResponseWriter, r *http.Request) {
 func (a *API) listListeners(w http.ResponseWriter, _ *http.Request) {
 	a.St.Mu.Lock()
 	defer a.St.Mu.Unlock()
-	jsonOut(w, 200, a.St.S.MailListeners)
+	jsonOut(w, 200, nonNil(a.St.S.MailListeners))
 }
 
 func (a *API) createListener(w http.ResponseWriter, r *http.Request) {
@@ -703,7 +712,7 @@ func (a *API) deleteListener(w http.ResponseWriter, r *http.Request) {
 func (a *API) listMailDomains(w http.ResponseWriter, _ *http.Request) {
 	a.St.Mu.Lock()
 	defer a.St.Mu.Unlock()
-	jsonOut(w, 200, a.St.S.MailDomains)
+	jsonOut(w, 200, nonNil(a.St.S.MailDomains))
 }
 
 func checkMailDomain(s *store.State, d *store.MailDomain) error {
@@ -783,7 +792,7 @@ func (a *API) deleteMailDomain(w http.ResponseWriter, r *http.Request) {
 func (a *API) listStreams(w http.ResponseWriter, _ *http.Request) {
 	a.St.Mu.Lock()
 	defer a.St.Mu.Unlock()
-	jsonOut(w, 200, a.St.S.Streams)
+	jsonOut(w, 200, nonNil(a.St.S.Streams))
 }
 
 func checkStream(r *store.StreamRule) error {

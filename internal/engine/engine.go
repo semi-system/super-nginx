@@ -272,7 +272,12 @@ func renderStream(s *store.State) []byte {
 				fmt.Fprintf(b, "        %s %s;\n", d.Domain, d.Backend)
 			}
 			fmt.Fprint(b, "    }\n")
-			fmt.Fprintf(b, "    server {\n        listen %d ssl;\n        ssl_certificate %s;\n        ssl_certificate_key %s;\n        proxy_pass %s;\n    }\n", l.Port, crt, key, up)
+			proxySSL := ""
+			if l.ProxySSL {
+				// re-encrypt to the backend (backend listens on its TLS port, e.g. 993)
+				proxySSL = "        proxy_ssl on;\n"
+			}
+			fmt.Fprintf(b, "    server {\n        listen %d ssl;\n        ssl_certificate %s;\n        ssl_certificate_key %s;\n%s        proxy_pass %s;\n    }\n", l.Port, crt, key, proxySSL, up)
 		default: // passthrough
 			fmt.Fprintf(b, "\n    # mail listener %d (%s, passthrough)\n", l.ID, l.Label)
 			if l.SNIRoute {

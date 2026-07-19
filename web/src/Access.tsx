@@ -27,7 +27,7 @@ export default function Access() {
   const [edit, setEdit] = useState<EditState | null>(null)
   const { error, busy, run } = useAsync()
 
-  const reload = async () => setLists(await get('/api/v1/accesslists'))
+  const reload = async () => setLists((await get('/api/v1/accesslists')) ?? [])
   useEffect(() => {
     run(reload)
   }, [])

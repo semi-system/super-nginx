@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"crypto/sha1"
 	"encoding/base64"
@@ -165,22 +166,32 @@ func (a *API) deleteAccessList(w http.ResponseWriter, r *http.Request) {
 
 // ---- backup / restore -------------------------------------------------------
 
-// backup = tar.gz of everything needed to rebuild /data: state + certs + acme
-// account. Rendered config is derived, so it is not included.
-var backupRoots = []string{"db", "certs", "acme"}
+// backup = tar.gz of everything needed to rebuild /data. The logical data goes
+// in as the portable store.Export envelope (data.json) — driver-independent, so
+// a future postgres/mysql driver reads the same file. Certs + ACME account are
+// file blobs carried alongside. Rendered config is derived, not included.
+const exportFile = "data.json"
 
-func (a *API) backup(w http.ResponseWriter, _ *http.Request) {
+var backupBlobRoots = []string{"certs", "acme"}
+
+// backup is POST so the password rides in a header (X-Backup-Password), never
+// a query string. Empty password = encrypt with the per-instance key.
+func (a *API) backup(w http.ResponseWriter, r *http.Request) {
 	a.St.Mu.Lock()
 	defer a.St.Mu.Unlock()
 
-	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Disposition",
-		fmt.Sprintf(`attachment; filename="super-nginx-backup-%s.tar.gz"`, time.Now().Format("20060102-150405")))
-	gz := gzip.NewWriter(w)
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-	defer func() { tw.Close(); gz.Close() }()
 
-	for _, root := range backupRoots {
+	// portable data envelope first
+	if data, err := a.St.S.MarshalExport(); err == nil {
+		hdr := &tar.Header{Name: exportFile, Mode: 0o600, Size: int64(len(data)), ModTime: time.Now()}
+		if tw.WriteHeader(hdr) == nil {
+			_, _ = tw.Write(data)
+		}
+	}
+	for _, root := range backupBlobRoots {
 		base := filepath.Join("/data", root)
 		_ = filepath.Walk(base, func(path string, fi os.FileInfo, err error) error {
 			if err != nil || fi.IsDir() {
@@ -200,12 +211,40 @@ func (a *API) backup(w http.ResponseWriter, _ *http.Request) {
 			return err
 		})
 	}
+	if err := tw.Close(); err != nil {
+		fail(w, 500, "%s", err)
+		return
+	}
+	if err := gz.Close(); err != nil {
+		fail(w, 500, "%s", err)
+		return
+	}
+
+	enc, err := encryptBackup(buf.Bytes(), r.Header.Get("X-Backup-Password"))
+	if err != nil {
+		fail(w, 500, "encrypt backup: %s", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf(`attachment; filename="super-nginx-backup-%s.snb"`, time.Now().Format("20060102-150405")))
+	_, _ = w.Write(enc)
 }
 
 func (a *API) restore(w http.ResponseWriter, r *http.Request) {
-	gz, err := gzip.NewReader(r.Body)
+	blob, err := io.ReadAll(r.Body)
 	if err != nil {
-		fail(w, 400, "not a gzip archive: %s", err)
+		fail(w, 400, "read body: %s", err)
+		return
+	}
+	plain, err := decryptBackup(blob, r.Header.Get("X-Backup-Password"))
+	if err != nil {
+		fail(w, 400, "%s", err)
+		return
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(plain))
+	if err != nil {
+		fail(w, 400, "corrupt backup (bad archive after decrypt): %s", err)
 		return
 	}
 	a.St.Mu.Lock()
@@ -213,6 +252,7 @@ func (a *API) restore(w http.ResponseWriter, r *http.Request) {
 
 	tr := tar.NewReader(gz)
 	restored := 0
+	var envelope []byte
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -223,13 +263,24 @@ func (a *API) restore(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		name := filepath.ToSlash(filepath.Clean(hdr.Name))
+		if hdr.Typeflag != tar.TypeReg || strings.Contains(name, "..") {
+			continue
+		}
+		if name == exportFile {
+			envelope, err = io.ReadAll(tr)
+			if err != nil {
+				fail(w, 400, "read %s: %s", exportFile, err)
+				return
+			}
+			continue
+		}
 		okPrefix := false
-		for _, root := range backupRoots {
-			if name == root || strings.HasPrefix(name, root+"/") {
+		for _, root := range backupBlobRoots {
+			if strings.HasPrefix(name, root+"/") {
 				okPrefix = true
 			}
 		}
-		if !okPrefix || strings.Contains(name, "..") || hdr.Typeflag != tar.TypeReg {
+		if !okPrefix {
 			continue
 		}
 		dst := filepath.Join("/data", name)
@@ -250,12 +301,23 @@ func (a *API) restore(w http.ResponseWriter, r *http.Request) {
 		f.Close()
 		restored++
 	}
-	if err := a.St.Reload(); err != nil {
-		fail(w, 422, "restored state is corrupt: %s", err)
+	if envelope == nil {
+		fail(w, 400, "archive has no %s (not a super-nginx backup)", exportFile)
+		return
+	}
+	state, err := store.ParseExport(envelope)
+	if err != nil {
+		fail(w, 422, "%s", err)
+		return
+	}
+	// adopt imported data through the current driver, then render + reload
+	a.St.S = state
+	if err := a.St.Save(); err != nil {
+		fail(w, 500, "save imported state: %s", err)
 		return
 	}
 	if err := a.applyLocked(); err != nil {
-		fail(w, 422, "restored state renders invalid config: %s", err)
+		fail(w, 422, "imported data renders invalid config: %s", err)
 		return
 	}
 	a.audit(r)

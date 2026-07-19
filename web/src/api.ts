@@ -50,6 +50,7 @@ export type MailListener = {
   mode: 'terminate' | 'passthrough'
   default_backend: string
   sni_route: boolean
+  proxy_ssl: boolean
   enabled: boolean
 }
 

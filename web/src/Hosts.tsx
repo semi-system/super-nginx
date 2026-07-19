@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { get, post, put, del, Host, Cert } from './api'
+import { Err, Row, Check, useAsync } from './ui'
+import CertPicker from './CertPicker'
+import DomainInput from './DomainInput'
 
 type AccessListOut = { id: number; name: string }
-import { Err, Row, Check, useAsync } from './ui'
 
 const empty: Host = {
   id: 0,
@@ -29,9 +31,9 @@ export default function Hosts() {
   const { error, busy, run } = useAsync()
 
   const reload = async () => {
-    setHosts(await get('/api/v1/hosts'))
-    setCerts(await get('/api/v1/certs'))
-    setAcls(await get('/api/v1/accesslists'))
+    setHosts((await get('/api/v1/hosts')) ?? [])
+    setCerts((await get('/api/v1/certs')) ?? [])
+    setAcls((await get('/api/v1/accesslists')) ?? [])
   }
   useEffect(() => {
     run(reload)
@@ -99,12 +101,8 @@ export default function Hosts() {
           }}
         >
           <h3>{edit.id ? `Edit host ${edit.id}` : 'New host'}</h3>
-          <Row label="Domains (space separated)">
-            <input
-              value={edit.domains.join(' ')}
-              onChange={(e) => setEdit({ ...edit, domains: e.target.value.split(/[\s,]+/).filter(Boolean) })}
-              placeholder="example.com www.example.com"
-            />
+          <Row label="Domains">
+            <DomainInput value={edit.domains} onChange={(domains) => setEdit({ ...edit, domains })} />
           </Row>
           <Row label="Type">
             <select value={edit.type} onChange={(e) => setEdit({ ...edit, type: e.target.value as Host['type'] })}>
@@ -124,16 +122,14 @@ export default function Hosts() {
           >
             <input value={edit.target} onChange={(e) => setEdit({ ...edit, target: e.target.value })} />
           </Row>
-          <Row label="Certificate">
-            <select value={edit.cert_id} onChange={(e) => setEdit({ ...edit, cert_id: +e.target.value })}>
-              <option value={0}>— none (http only) —</option>
-              {certs.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.domains.join(', ')})
-                </option>
-              ))}
-            </select>
-          </Row>
+          <CertPicker
+            value={edit.cert_id}
+            certs={certs}
+            defaultDomains={edit.domains}
+            noneLabel="— none (http only) —"
+            onChange={(id) => setEdit({ ...edit, cert_id: id })}
+            onCertsChanged={setCerts}
+          />
           <Row label="Access list">
             <select value={edit.access_list_id} onChange={(e) => setEdit({ ...edit, access_list_id: +e.target.value })}>
               <option value={0}>— none —</option>
