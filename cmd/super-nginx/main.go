@@ -1,31 +1,33 @@
 // Command super-nginx supervises the bundled nginx and serves the management
-// UI/API. Phase 0: supervisor + embedded UI + health endpoint only.
+// UI/API: state in /data/db/state.json -> rendered nginx config -> nginx -t
+// -> reload, with automatic rollback on failure.
 package main
 
 import (
-	"encoding/json"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
-	"sync/atomic"
 	"syscall"
 
+	"github.com/morningstar-sudo/super-nginx/internal/api"
+	"github.com/morningstar-sudo/super-nginx/internal/certs"
+	"github.com/morningstar-sudo/super-nginx/internal/engine"
+	"github.com/morningstar-sudo/super-nginx/internal/store"
+	"github.com/morningstar-sudo/super-nginx/internal/supervisor"
 	"github.com/morningstar-sudo/super-nginx/web"
 )
 
-const nginxBin = "/usr/sbin/nginx"
-
-// Rendered configs and state live under /data (the single volume). The bridge
-// files baked into the image include /data/nginx/*.d/*.conf.
 var dataDirs = []string{
 	"/data/nginx/conf.d",
 	"/data/nginx/mail.d",
 	"/data/nginx/stream.d",
 	"/data/certs",
 	"/data/db",
+	"/data/logs",
+	"/data/www",
+	"/data/acme",
 }
 
 func confPath() string {
@@ -45,44 +47,40 @@ func main() {
 		}
 	}
 
-	conf := confPath()
-	if out, err := exec.Command(nginxBin, "-t", "-c", conf).CombinedOutput(); err != nil {
-		log.Printf("nginx config test failed (%s):\n%s", conf, out)
-		os.Exit(1)
+	st, err := store.Load("/data/db/state.json")
+	if err != nil {
+		log.Fatalf("load state: %v", err)
 	}
+	api.EnsureAdmin(st)
 
-	nginx := exec.Command(nginxBin, "-c", conf, "-g", "daemon off;")
-	nginx.Stdout, nginx.Stderr = os.Stdout, os.Stderr
-	if err := nginx.Start(); err != nil {
+	sup := supervisor.New(confPath())
+
+	// render state -> config and test before nginx ever starts; a state that
+	// renders invalid config is a bug and should fail the boot loudly
+	if err := engine.Apply(&st.S, sup, false); err != nil {
+		log.Fatalf("initial config render failed: %v", err)
+	}
+	if err := sup.Start(); err != nil {
 		log.Fatalf("start nginx: %v", err)
 	}
-	log.Printf("super-nginx: nginx started (pid %d, conf %s)", nginx.Process.Pid, conf)
+	log.Printf("super-nginx: nginx started (pid %d, conf %s)", sup.Pid(), sup.Conf)
 
-	var running atomic.Bool
-	running.Store(true)
-	nginxDone := make(chan error, 1)
-	go func() {
-		err := nginx.Wait()
-		running.Store(false)
-		nginxDone <- err
-	}()
-
-	go serveUI(&running)
+	go certs.RenewLoop(st, func() error { return engine.Apply(&st.S, sup, true) })
+	go serveUI(st, sup)
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
 	select {
-	case err := <-nginxDone:
+	case err := <-sup.Done():
 		// ponytail: no in-process restart; exit and let the orchestrator restart us
 		log.Fatalf("nginx exited: %v", err)
 	case s := <-sigs:
 		log.Printf("super-nginx: got %v, stopping nginx gracefully", s)
-		_ = nginx.Process.Signal(syscall.SIGQUIT)
-		<-nginxDone
+		sup.Stop()
 	}
 }
 
-func serveUI(running *atomic.Bool) {
+func serveUI(st *store.Store, sup *supervisor.Supervisor) {
 	dist, err := fs.Sub(web.Dist, "dist")
 	if err != nil {
 		log.Fatalf("embedded UI: %v", err)
@@ -90,13 +88,7 @@ func serveUI(running *atomic.Bool) {
 
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServerFS(dist))
-	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"status": "ok",
-			"nginx":  map[string]bool{"running": running.Load()},
-		})
-	})
+	api.New(st, sup).Register(mux)
 
 	addr := ":8181"
 	if p := os.Getenv("UI_PORT"); p != "" {
