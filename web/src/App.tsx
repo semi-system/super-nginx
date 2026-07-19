@@ -75,6 +75,12 @@ export default function App() {
         {tab === 'Config' && <ConfigView />}
         {tab === 'Settings' && <Settings onLogout={() => setUser(null)} />}
       </main>
+      <footer className="footer">
+        © {new Date().getFullYear()}{' '}
+        <a href="https://github.com/morningstar-sudo" target="_blank" rel="noreferrer">
+          morningstar-sudo
+        </a>
+      </footer>
     </div>
   )
 }

@@ -88,6 +88,14 @@ func write(s *store.State) error {
 			return err
 		}
 	}
+	// cache dirs must exist and be writable before nginx references them
+	for _, h := range s.Hosts {
+		if h.Enabled && cacheEnabled(h) {
+			if err := os.MkdirAll(fmt.Sprintf("/data/cache/%d", h.ID), 0o755); err != nil {
+				return err
+			}
+		}
+	}
 	if err := os.WriteFile(filepath.Join(LiveDir, "conf.d", "hosts.conf"), renderHTTP(s), 0o644); err != nil {
 		return err
 	}
@@ -134,9 +142,29 @@ func renderHTTP(s *store.State) []byte {
 	return b.Bytes()
 }
 
+// cacheZone is the shared-memory zone name for a host's proxy cache.
+func cacheZone(id int) string { return fmt.Sprintf("sn_cache_%d", id) }
+
+func cacheEnabled(h store.Host) bool { return h.Type == "proxy" && h.Cache }
+
+func cacheTime(h store.Host) string {
+	if h.CacheTime == "" {
+		return "10m"
+	}
+	return h.CacheTime
+}
+
 func writeHost(b *bytes.Buffer, s *store.State, h store.Host) {
 	names := strings.Join(h.Domains, " ")
 	cert := s.CertByID(h.CertID)
+
+	// proxy_cache_path is http-level (hosts.conf is included inside http{});
+	// declared once per host, both the :8080 and :8443 servers reference it.
+	// ponytail: max_size fixed at 512m — expose a knob if it ever bites.
+	if cacheEnabled(h) {
+		fmt.Fprintf(b, "\nproxy_cache_path /data/cache/%d levels=1:2 keys_zone=%s:10m max_size=512m inactive=%s use_temp_path=off;\n",
+			h.ID, cacheZone(h.ID), cacheTime(h))
+	}
 
 	// plain :8080 server — ACME challenges always answered; either redirects
 	// to https (force_ssl) or serves content
@@ -229,6 +257,10 @@ func writeContent(b *bytes.Buffer, s *store.State, h store.Host) {
 		fmt.Fprint(b, "        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n")
 		if h.Websocket {
 			fmt.Fprint(b, "        proxy_http_version 1.1;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection $sn_connection;\n")
+		}
+		if cacheEnabled(h) {
+			fmt.Fprintf(b, "        proxy_cache %s;\n        proxy_cache_valid 200 302 %s;\n        proxy_cache_valid 404 1m;\n        proxy_cache_use_stale error timeout updating;\n        add_header X-Cache-Status $upstream_cache_status;\n",
+				cacheZone(h.ID), cacheTime(h))
 		}
 		if h.LocationSnippet != "" {
 			fmt.Fprintf(b, "        # location snippet\n%s\n", indent(indent(h.LocationSnippet)))

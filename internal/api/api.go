@@ -193,8 +193,14 @@ func checkHost(s *store.State, h *store.Host) error {
 	if h.AccessListID != 0 && s.AccessListByID(h.AccessListID) == nil {
 		return fmt.Errorf("access list %d not found", h.AccessListID)
 	}
+	if h.Cache && h.CacheTime != "" && !nginxTime.MatchString(h.CacheTime) {
+		return fmt.Errorf("cache time %q must be an nginx time (e.g. 30s, 10m, 1h)", h.CacheTime)
+	}
 	return nil
 }
+
+// nginx time: digits + optional unit (ms/s/m/h/d/w/M/y), e.g. 10m, 1h, 60s.
+var nginxTime = regexp.MustCompile(`^[0-9]+(ms|s|m|h|d|w|M|y)?$`)
 
 func checkListener(s *store.State, l *store.MailListener) error {
 	if err := checkPort(l.Port); err != nil {

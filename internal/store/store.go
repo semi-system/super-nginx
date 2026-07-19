@@ -33,6 +33,8 @@ type Host struct {
 	Websocket       bool     `json:"websocket"`
 	WAF             bool     `json:"waf"`
 	AccessListID    int      `json:"access_list_id"`
+	Cache           bool     `json:"cache"`      // proxy: enable proxy_cache
+	CacheTime       string   `json:"cache_time"` // nginx time for 200/302 (e.g. 10m); default 10m
 	ServerSnippet   string   `json:"server_snippet"`
 	LocationSnippet string   `json:"location_snippet"`
 	Enabled         bool     `json:"enabled"`

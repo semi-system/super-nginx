@@ -18,6 +18,8 @@ const empty: Host = {
   websocket: false,
   waf: false,
   access_list_id: 0,
+  cache: false,
+  cache_time: '10m',
   server_snippet: '',
   location_snippet: '',
   enabled: true,
@@ -148,6 +150,9 @@ export default function Hosts() {
             <Check label="HSTS" checked={edit.hsts} onChange={(v) => setEdit({ ...edit, hsts: v })} />
             <Check label="Websockets" checked={edit.websocket} onChange={(v) => setEdit({ ...edit, websocket: v })} />
             <Check label="WAF (ModSecurity + CRS)" checked={edit.waf} onChange={(v) => setEdit({ ...edit, waf: v })} />
+            {edit.type === 'proxy' && (
+              <Check label="Cache" checked={edit.cache} onChange={(v) => setEdit({ ...edit, cache: v })} />
+            )}
           </div>
           <Row label="Custom nginx — server context">
             <textarea

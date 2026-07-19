@@ -27,6 +27,8 @@ export type Host = {
   websocket: boolean
   waf: boolean
   access_list_id: number
+  cache: boolean
+  cache_time: string
   server_snippet: string
   location_snippet: string
   enabled: boolean

@@ -26,6 +26,24 @@ func TestStreamResolver(t *testing.T) {
 		t.Fatalf("empty default backend should render `default \"\";`, got:\n%s", got)
 	}
 
+	// proxy host with cache on emits http-level path + location directives
+	cached := &store.State{
+		Hosts: []store.Host{
+			{ID: 5, Type: "proxy", Domains: []string{"a.example.com"}, Target: "http://127.0.0.1:3000", Cache: true, CacheTime: "30s", Enabled: true},
+		},
+	}
+	cg := string(renderHTTP(cached))
+	if !strings.Contains(cg, "proxy_cache_path /data/cache/5") || !strings.Contains(cg, "keys_zone=sn_cache_5:") {
+		t.Fatalf("cache host missing proxy_cache_path, got:\n%s", cg)
+	}
+	if !strings.Contains(cg, "proxy_cache sn_cache_5;") || !strings.Contains(cg, "proxy_cache_valid 200 302 30s;") {
+		t.Fatalf("cache host missing location cache directives, got:\n%s", cg)
+	}
+	// non-cache proxy host emits nothing cache-related
+	if strings.Contains(string(renderHTTP(&store.State{Hosts: []store.Host{{ID: 6, Type: "proxy", Domains: []string{"b"}, Target: "http://127.0.0.1:1", Enabled: true}}})), "proxy_cache") {
+		t.Fatal("non-cache host should not emit proxy_cache")
+	}
+
 	plain := &store.State{
 		MailListeners: []store.MailListener{
 			{ID: 1, Port: 2525, Mode: "passthrough", DefaultBackend: "10.0.0.5:25", Enabled: true},
