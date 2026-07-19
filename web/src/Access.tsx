@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { get, post, put, del } from './api'
-import { Err, Row, useAsync } from './ui'
+import { Err, Row, Modal, useAsync } from './ui'
 
 type ListOut = {
   id: number
@@ -100,6 +100,7 @@ export default function Access() {
       </table>
 
       {edit && (
+        <Modal onClose={() => setEdit(null)}>
         <form className="editor" onSubmit={(e) => { e.preventDefault(); save() }}>
           <h3>{edit.id ? 'Edit access list' : 'New access list'}</h3>
           <Row label="Name">
@@ -155,6 +156,7 @@ export default function Access() {
             <button type="button" onClick={() => setEdit(null)}>Cancel</button>
           </div>
         </form>
+        </Modal>
       )}
     </section>
   )

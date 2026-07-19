@@ -1,6 +1,22 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 // Tiny shared form helpers — no UI library.
+
+// Modal: overlay + centered box. Backdrop click or Escape closes.
+export function Modal({ onClose, children }: { onClose: () => void; children: any }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div className="modal-overlay" onMouseDown={onClose}>
+      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  )
+}
 
 export function Err({ msg }: { msg: string | null }) {
   if (!msg) return null

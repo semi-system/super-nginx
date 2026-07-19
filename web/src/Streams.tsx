@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { get, post, put, del, StreamRule } from './api'
-import { Err, Row, Check, useAsync } from './ui'
+import { Err, Row, Check, Modal, useAsync } from './ui'
 
 const empty: StreamRule = { id: 0, port: 15000, udp: false, backend: '', enabled: true }
 
@@ -64,6 +64,7 @@ export default function Streams() {
       </table>
 
       {edit && (
+        <Modal onClose={() => setEdit(null)}>
         <form className="editor" onSubmit={(e) => { e.preventDefault(); save() }}>
           <h3>{edit.id ? 'Edit stream' : 'New stream'}</h3>
           <Row label="Container port (>1024)">
@@ -81,6 +82,7 @@ export default function Streams() {
             <button type="button" onClick={() => setEdit(null)}>Cancel</button>
           </div>
         </form>
+        </Modal>
       )}
     </section>
   )

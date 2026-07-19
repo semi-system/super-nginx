@@ -5,6 +5,8 @@
 package api
 
 import (
+	"archive/zip"
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -289,6 +291,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	auth("POST /api/v1/certs/custom", a.createCustomCert)
 	auth("POST /api/v1/certs/acme", a.createACMECert)
 	auth("POST /api/v1/certs/{id}/renew", a.renewCert)
+	auth("GET /api/v1/certs/{id}/download", a.downloadCert)
 	auth("DELETE /api/v1/certs/{id}", a.deleteCert)
 
 	auth("GET /api/v1/mail/listeners", a.listListeners)
@@ -610,6 +613,63 @@ func (a *API) renewCert(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
+}
+
+// downloadCert streams a zip of fullchain.pem + privkey.pem for the cert.
+func (a *API) downloadCert(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		fail(w, 400, "bad id")
+		return
+	}
+	a.St.Mu.Lock()
+	c := a.St.S.CertByID(id)
+	a.St.Mu.Unlock()
+	if c == nil {
+		fail(w, 404, "cert %d not found", id)
+		return
+	}
+	fullchain, privkey := engine.CertPath(id)
+	fc, err1 := os.ReadFile(fullchain)
+	pk, err2 := os.ReadFile(privkey)
+	if err1 != nil || err2 != nil {
+		fail(w, 404, "cert files not found on disk")
+		return
+	}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, f := range []struct {
+		name string
+		data []byte
+	}{{"fullchain.pem", fc}, {"privkey.pem", pk}} {
+		fw, err := zw.Create(f.name)
+		if err == nil {
+			_, _ = fw.Write(f.data)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		fail(w, 500, "%s", err)
+		return
+	}
+	fname := safeFilename(c.Name)
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, fname+".zip"))
+	_, _ = w.Write(buf.Bytes())
+}
+
+// safeFilename keeps letters/digits/-._; everything else becomes _.
+func safeFilename(s string) string {
+	if s == "" {
+		return "cert"
+	}
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			return r
+		default:
+			return '_'
+		}
+	}, s)
 }
 
 func (a *API) deleteCert(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { get, post, put, del, Host, Cert } from './api'
-import { Err, Row, Check, useAsync } from './ui'
+import { Err, Row, Check, Modal, useAsync } from './ui'
 import CertPicker from './CertPicker'
 import DomainInput from './DomainInput'
 
@@ -93,6 +93,7 @@ export default function Hosts() {
       </table>
 
       {edit && (
+        <Modal onClose={() => setEdit(null)}>
         <form
           className="editor"
           onSubmit={(e) => {
@@ -173,6 +174,7 @@ export default function Hosts() {
             </button>
           </div>
         </form>
+        </Modal>
       )}
     </section>
   )

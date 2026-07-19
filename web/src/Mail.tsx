@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { get, post, put, del, MailListener, MailDomain, Cert } from './api'
-import { Err, Row, Check, useAsync } from './ui'
+import { Err, Row, Check, Modal, useAsync } from './ui'
 import CertPicker from './CertPicker'
 
 const emptyListener: MailListener = {
@@ -106,6 +106,7 @@ export default function Mail() {
       </table>
 
       {editD && (
+        <Modal onClose={() => setEditD(null)}>
         <form className="editor" onSubmit={(e) => { e.preventDefault(); saveD() }}>
           <h3>{editD.id ? 'Edit domain' : 'New mail domain'}</h3>
           <Row label="Domain (as sent in SNI, e.g. mail.example.com)">
@@ -127,6 +128,7 @@ export default function Mail() {
             <button type="button" onClick={() => setEditD(null)}>Cancel</button>
           </div>
         </form>
+        </Modal>
       )}
 
       <div className="bar">
@@ -162,6 +164,7 @@ export default function Mail() {
       </table>
 
       {editL && (
+        <Modal onClose={() => setEditL(null)}>
         <form className="editor" onSubmit={(e) => { e.preventDefault(); saveL() }}>
           <h3>{editL.id ? 'Edit listener' : 'New listener'}</h3>
           <Row label="Protocol (display only)">
@@ -201,6 +204,7 @@ export default function Mail() {
             <button type="button" onClick={() => setEditL(null)}>Cancel</button>
           </div>
         </form>
+        </Modal>
       )}
     </section>
   )

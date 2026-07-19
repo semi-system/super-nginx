@@ -12,11 +12,24 @@ import Settings from './Settings'
 const tabs = ['Dashboard', 'Hosts', 'Certificates', 'Mail', 'Streams', 'Access', 'Config', 'Settings'] as const
 type Tab = (typeof tabs)[number]
 
+const slug = (t: Tab) => t.toLowerCase()
+// tab from URL hash so F5 stays on the current page (no router dependency).
+function tabFromHash(): Tab {
+  const h = location.hash.replace(/^#\/?/, '').toLowerCase()
+  return tabs.find((t) => slug(t) === h) ?? 'Dashboard'
+}
+
 export default function App() {
   const [user, setUser] = useState<string | null>(null)
   const [checked, setChecked] = useState(false)
-  const [tab, setTab] = useState<Tab>('Dashboard')
+  const [tab, setTab] = useState<Tab>(tabFromHash)
   const [mustChange, setMustChange] = useState(false)
+
+  useEffect(() => {
+    const onHash = () => setTab(tabFromHash())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
 
   useEffect(() => {
     get('/api/v1/me')
@@ -44,7 +57,7 @@ export default function App() {
       <nav>
         <span className="brand">super-nginx</span>
         {tabs.map((t) => (
-          <a key={t} className={t === tab ? 'active' : ''} onClick={() => setTab(t)}>
+          <a key={t} className={t === tab ? 'active' : ''} href={`#/${slug(t)}`}>
             {t}
           </a>
         ))}

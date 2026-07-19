@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { get, post, del, Cert } from './api'
-import { Err, Row, useAsync } from './ui'
+import { Err, Row, Modal, useAsync } from './ui'
+import { dnsProviders } from './dnsProviders'
 
 export default function Certs() {
   const [certs, setCerts] = useState<Cert[]>([])
@@ -16,6 +17,8 @@ export default function Certs() {
   const [challenge, setChallenge] = useState<'http' | 'dns'>('http')
   const [provider, setProvider] = useState('')
   const [dnsEnv, setDnsEnv] = useState('')
+
+  const providerEnv = dnsProviders.find((p) => p.code === provider)?.env ?? []
 
   const reload = async () => setCerts((await get('/api/v1/certs')) ?? [])
   useEffect(() => {
@@ -98,6 +101,9 @@ export default function Certs() {
                     Renew
                   </button>
                 )}{' '}
+                <button type="button" onClick={() => (window.location.href = `/api/v1/certs/${c.id}/download`)}>
+                  Download
+                </button>{' '}
                 <button onClick={() => remove(c.id)}>Delete</button>
               </td>
             </tr>
@@ -106,6 +112,7 @@ export default function Certs() {
       </table>
 
       {mode === 'custom' && (
+        <Modal onClose={() => setMode('none')}>
         <form className="editor" onSubmit={(e) => { e.preventDefault(); submitCustom() }}>
           <h3>Upload certificate</h3>
           <Row label="Name">
@@ -122,9 +129,11 @@ export default function Certs() {
             <button type="button" onClick={() => setMode('none')}>Cancel</button>
           </div>
         </form>
+        </Modal>
       )}
 
       {mode === 'acme' && (
+        <Modal onClose={() => setMode('none')}>
         <form className="editor" onSubmit={(e) => { e.preventDefault(); submitACME() }}>
           <h3>Let's Encrypt certificate</h3>
           <p className="hint">
@@ -145,15 +154,24 @@ export default function Certs() {
           </Row>
           {challenge === 'dns' && (
             <>
-              <Row label="DNS provider (lego name, e.g. cloudflare)">
-                <input value={provider} onChange={(e) => setProvider(e.target.value)} />
+              <Row label="DNS provider">
+                <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+                  <option value="">— select provider —</option>
+                  {dnsProviders.map((p) => (
+                    <option key={p.code} value={p.code}>
+                      {p.name} ({p.code})
+                    </option>
+                  ))}
+                </select>
               </Row>
-              <Row label="Provider credentials (KEY=value per line)">
+              <Row label="Provider credentials (KEY=value per line — not every key is required, see lego docs)">
                 <textarea
-                  rows={3}
+                  rows={Math.max(3, providerEnv.length)}
                   value={dnsEnv}
                   onChange={(e) => setDnsEnv(e.target.value)}
-                  placeholder="CLOUDFLARE_DNS_API_TOKEN=..."
+                  placeholder={
+                    providerEnv.length ? providerEnv.map((k) => k + '=').join('\n') : 'CLOUDFLARE_DNS_API_TOKEN=...'
+                  }
                 />
               </Row>
             </>
@@ -165,6 +183,7 @@ export default function Certs() {
             <button type="button" onClick={() => setMode('none')}>Cancel</button>
           </div>
         </form>
+        </Modal>
       )}
     </section>
   )
