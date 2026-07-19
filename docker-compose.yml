@@ -1,0 +1,43 @@
+# super-nginx with a bind-mounted ./data folder so config, certs and the ACME
+# account survive container recreation and are visible/backup-able on the host.
+#
+#   docker compose up -d
+#
+# The init service fixes ownership: the runtime is nonroot (uid 65532) with a
+# read-only rootfs, and a freshly created host folder is root-owned, so the app
+# couldn't write /data without this. (On Docker Desktop for Windows/Mac bind
+# mounts are already writable by any uid — the chown is just harmless there.)
+
+services:
+  init:
+    image: busybox
+    command: sh -c "mkdir -p /data && chown -R 65532:65532 /data"
+    volumes:
+      - ./data:/data
+    restart: "no"
+
+  super-nginx:
+    image: ghcr.io/morningstar-sudo/super-nginx
+    # build: .            # uncomment to build locally instead of using a pulled image
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - "80:8080"         # http  (nginx)
+      - "443:8443"        # https (nginx)
+      - "8181:8181"       # management UI + API
+      # mail / stream listeners — add per listener you create, e.g.:
+      # - "465:2465"      # SMTPS -> container 2465
+      # - "993:2993"      # IMAPS -> container 2993
+    volumes:
+      - ./data:/data
+    tmpfs:
+      - /tmp
+    read_only: true
+    # environment:
+    #   - IS_MS_ON=true   # global WAF default (per-host toggle in the UI overrides)
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: always

@@ -34,9 +34,19 @@ docker run --rm -p 80:8080 -p 443:8443 -p 8181:8181 \
 # mail/stream listener: mở thêm port tương ứng, ví dụ -p 465:2465
 ```
 
+Hoặc dùng **docker compose** (bind mount `./data` để dữ liệu nằm trên host,
+sống qua mọi lần recreate container):
+
+```sh
+docker compose up -d          # init service tự chown ./data cho uid 65532
+```
+
 - `:8080` / `:8443` — nginx http/https (map từ 80/443 ở host)
 - `:8181` — management UI + API; password admin in ra log lần đầu chạy
-- `/data` — volume duy nhất: state.json, config render, certs, ACME state
+- `/data` — volume duy nhất: state.json, config render, certs, ACME state.
+  **Phải là named volume hoặc bind mount** — mất `/data` là mất toàn bộ cấu
+  hình. Bind mount folder mới thì cần chown uid 65532 (compose làm sẵn qua
+  init service; `docker run -v` thì dùng named volume để khỏi lo).
 - WAF bật per-host trong UI (`IS_MS_ON=true` chỉ còn là default toàn cục)
 
 ## Dev
