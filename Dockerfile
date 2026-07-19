@@ -28,5 +28,5 @@ COPY bridge/conf.d/ /etc/nginx/conf.d/
 COPY bridge/mail.d/ /etc/nginx/mail.d/
 COPY bridge/stream.d/ /etc/nginx/stream.d/
 
-EXPOSE 8080 8181
+EXPOSE 8080 8181 8443
 ENTRYPOINT ["/usr/sbin/super-nginx"]
