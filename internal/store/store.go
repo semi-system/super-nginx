@@ -22,22 +22,30 @@ type User struct {
 }
 
 type Host struct {
-	ID              int      `json:"id"`
-	Type            string   `json:"type"` // proxy | redirect | static
-	Domains         []string `json:"domains"`
-	Target          string   `json:"target"` // proxy: http://host:port, redirect: URL prefix, static: dir under /data/www
-	CertID          int      `json:"cert_id"`
-	ForceSSL        bool     `json:"force_ssl"`
-	HTTP2           bool     `json:"http2"`
-	HSTS            bool     `json:"hsts"`
-	Websocket       bool     `json:"websocket"`
-	WAF             bool     `json:"waf"`
-	AccessListID    int      `json:"access_list_id"`
-	Cache           bool     `json:"cache"`      // proxy: enable proxy_cache
-	CacheTime       string   `json:"cache_time"` // nginx time for 200/302 (e.g. 10m); default 10m
-	ServerSnippet   string   `json:"server_snippet"`
-	LocationSnippet string   `json:"location_snippet"`
-	Enabled         bool     `json:"enabled"`
+	ID              int             `json:"id"`
+	Type            string          `json:"type"` // proxy | redirect | static
+	Domains         []string        `json:"domains"`
+	Target          string          `json:"target"` // proxy: http://host:port, redirect: URL prefix, static: dir under /data/www
+	CertID          int             `json:"cert_id"`
+	ForceSSL        bool            `json:"force_ssl"`
+	HTTP2           bool            `json:"http2"`
+	HSTS            bool            `json:"hsts"`
+	Websocket       bool            `json:"websocket"`
+	WAF             bool            `json:"waf"`
+	AccessListID    int             `json:"access_list_id"`
+	Cache           bool            `json:"cache"`      // proxy: enable proxy_cache
+	CacheTime       string          `json:"cache_time"` // nginx time for 200/302 (e.g. 10m); default 10m
+	Directives      []HostDirective `json:"directives"` // extra server-context directives (client_max_body_size, ...)
+	ServerSnippet   string          `json:"server_snippet"`
+	LocationSnippet string          `json:"location_snippet"`
+	Enabled         bool            `json:"enabled"`
+}
+
+// HostDirective is one nginx directive rendered in the server context,
+// e.g. {Key: "client_max_body_size", Value: "100m"} -> `client_max_body_size 100m;`.
+type HostDirective struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 type Cert struct {
@@ -54,9 +62,9 @@ type Cert struct {
 
 type MailListener struct {
 	ID             int    `json:"id"`
-	Label          string `json:"label"` // smtp | imap | pop3 — display only, stream is protocol-agnostic
-	Port           int    `json:"port"`  // container port >1024
-	Mode           string `json:"mode"`  // terminate | passthrough
+	Label          string `json:"label"`           // smtp | imap | pop3 — display only, stream is protocol-agnostic
+	Port           int    `json:"port"`            // container port >1024
+	Mode           string `json:"mode"`            // terminate | passthrough
 	DefaultBackend string `json:"default_backend"` // host:port, used when client sends no SNI
 	SNIRoute       bool   `json:"sni_route"`       // passthrough: route by SNI via ssl_preread
 	ProxySSL       bool   `json:"proxy_ssl"`       // terminate: re-encrypt to backend (backend on TLS port)

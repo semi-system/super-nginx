@@ -6,6 +6,27 @@ import DomainInput from './DomainInput'
 
 type AccessListOut = { id: number; name: string }
 
+// Preset rules: pick one and the row is filled with a sensible default value.
+// Value stays editable, and "Custom…" adds a blank row for anything else.
+const directivePresets: { key: string; value: string; label: string }[] = [
+  { key: 'client_max_body_size', value: '100m', label: 'Max upload size' },
+  { key: 'proxy_read_timeout', value: '300s', label: 'Proxy read timeout' },
+  { key: 'proxy_send_timeout', value: '300s', label: 'Proxy send timeout' },
+  { key: 'proxy_connect_timeout', value: '60s', label: 'Proxy connect timeout' },
+  { key: 'client_body_timeout', value: '60s', label: 'Client body timeout' },
+  { key: 'send_timeout', value: '60s', label: 'Send timeout' },
+  { key: 'keepalive_timeout', value: '65s', label: 'Keepalive timeout' },
+  { key: 'proxy_buffering', value: 'off', label: 'Disable proxy buffering' },
+  { key: 'proxy_request_buffering', value: 'off', label: 'Disable request buffering' },
+  { key: 'proxy_buffer_size', value: '16k', label: 'Proxy buffer size' },
+  { key: 'proxy_max_temp_file_size', value: '0', label: 'Disable temp file buffering' },
+  { key: 'gzip', value: 'on', label: 'Enable gzip' },
+  { key: 'server_tokens', value: 'off', label: 'Hide nginx version' },
+  { key: 'add_header', value: 'X-Frame-Options SAMEORIGIN always', label: 'Add header' },
+]
+
+const directiveNames = directivePresets.map((p) => p.key)
+
 const empty: Host = {
   id: 0,
   type: 'proxy',
@@ -20,6 +41,7 @@ const empty: Host = {
   access_list_id: 0,
   cache: false,
   cache_time: '10m',
+  directives: [],
   server_snippet: '',
   location_snippet: '',
   enabled: true,
@@ -154,6 +176,57 @@ export default function Hosts() {
               <Check label="Cache" checked={edit.cache} onChange={(v) => setEdit({ ...edit, cache: v })} />
             )}
           </div>
+          <Row label="Directives (server context — rendered as `name value;`)">
+            <datalist id="nginx-directives">
+              {directiveNames.map((d) => (
+                <option key={d} value={d} />
+              ))}
+            </datalist>
+            <div>
+              {edit.directives.map((d, i) => (
+                <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                  <input
+                    list="nginx-directives"
+                    placeholder="client_max_body_size"
+                    value={d.key}
+                    onChange={(e) => {
+                      const directives = [...edit.directives]
+                      directives[i] = { ...d, key: e.target.value }
+                      setEdit({ ...edit, directives })
+                    }}
+                  />
+                  <input
+                    placeholder="100m"
+                    value={d.value}
+                    onChange={(e) => {
+                      const directives = [...edit.directives]
+                      directives[i] = { ...d, value: e.target.value }
+                      setEdit({ ...edit, directives })
+                    }}
+                  />
+                  <button type="button" onClick={() => setEdit({ ...edit, directives: edit.directives.filter((_, j) => j !== i) })}>
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <select
+                value=""
+                onChange={(e) => {
+                  const p = directivePresets.find((x) => x.key === e.target.value)
+                  const row = p ? { key: p.key, value: p.value } : { key: '', value: '' }
+                  setEdit({ ...edit, directives: [...edit.directives, row] })
+                }}
+              >
+                <option value="">+ add rule…</option>
+                {directivePresets.map((p) => (
+                  <option key={p.label} value={p.key}>
+                    {p.label} ({p.key} {p.value})
+                  </option>
+                ))}
+                <option value="__custom__">Custom…</option>
+              </select>
+            </div>
+          </Row>
           <Row label="Custom nginx — server context">
             <textarea
               rows={3}

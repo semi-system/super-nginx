@@ -196,11 +196,29 @@ func checkHost(s *store.State, h *store.Host) error {
 	if h.Cache && h.CacheTime != "" && !nginxTime.MatchString(h.CacheTime) {
 		return fmt.Errorf("cache time %q must be an nginx time (e.g. 30s, 10m, 1h)", h.CacheTime)
 	}
+	if h.Directives == nil {
+		h.Directives = []store.HostDirective{} // store [] not null in the DB
+	}
+	for _, d := range h.Directives {
+		if !directiveKey.MatchString(d.Key) {
+			return fmt.Errorf("invalid directive name %q", d.Key)
+		}
+		if strings.TrimSpace(d.Value) == "" {
+			return fmt.Errorf("directive %q needs a value", d.Key)
+		}
+		// keep it a single simple directive; complex nginx goes in a snippet
+		if strings.ContainsAny(d.Value, ";{}\n\r") {
+			return fmt.Errorf("directive %q value must not contain ; { } or newlines — use a server snippet instead", d.Key)
+		}
+	}
 	return nil
 }
 
 // nginx time: digits + optional unit (ms/s/m/h/d/w/M/y), e.g. 10m, 1h, 60s.
 var nginxTime = regexp.MustCompile(`^[0-9]+(ms|s|m|h|d|w|M|y)?$`)
+
+// directiveKey: a bare nginx directive name (letters, digits, underscore).
+var directiveKey = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 func checkListener(s *store.State, l *store.MailListener) error {
 	if err := checkPort(l.Port); err != nil {
@@ -469,7 +487,16 @@ func (a *API) putSettings(w http.ResponseWriter, r *http.Request) {
 func (a *API) listHosts(w http.ResponseWriter, _ *http.Request) {
 	a.St.Mu.Lock()
 	defer a.St.Mu.Unlock()
-	jsonOut(w, 200, nonNil(a.St.S.Hosts))
+	// normalize nil directives to [] so the UI (which maps over them) never
+	// sees null for hosts saved before the field existed
+	hosts := make([]store.Host, len(a.St.S.Hosts))
+	copy(hosts, a.St.S.Hosts)
+	for i := range hosts {
+		if hosts[i].Directives == nil {
+			hosts[i].Directives = []store.HostDirective{}
+		}
+	}
+	jsonOut(w, 200, nonNil(hosts))
 }
 
 func (a *API) createHost(w http.ResponseWriter, r *http.Request) {

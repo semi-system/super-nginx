@@ -44,6 +44,17 @@ func TestStreamResolver(t *testing.T) {
 		t.Fatal("non-cache host should not emit proxy_cache")
 	}
 
+	// extra directives render in server context as `name value;`
+	withDir := &store.State{
+		Hosts: []store.Host{
+			{ID: 7, Type: "proxy", Domains: []string{"d.example.com"}, Target: "http://127.0.0.1:8",
+				Directives: []store.HostDirective{{Key: "client_max_body_size", Value: "100m"}}, Enabled: true},
+		},
+	}
+	if !strings.Contains(string(renderHTTP(withDir)), "client_max_body_size 100m;") {
+		t.Fatal("directive not rendered")
+	}
+
 	plain := &store.State{
 		MailListeners: []store.MailListener{
 			{ID: 1, Port: 2525, Mode: "passthrough", DefaultBackend: "10.0.0.5:25", Enabled: true},

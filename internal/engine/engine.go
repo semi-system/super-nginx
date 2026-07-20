@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	LiveDir = "/data/nginx"
-	bakDir  = "/data/nginx.bak"
+	LiveDir  = "/data/nginx"
+	bakDir   = "/data/nginx.bak"
 	CertsDir = "/data/certs"
 	WWWDir   = "/data/www"
 	// lego's HTTP-01 solver listens here during a challenge; every :8080
@@ -233,6 +233,11 @@ func writeServerCommon(b *bytes.Buffer, h store.Host) {
 		fmt.Fprint(b, "    modsecurity on;\n    modsecurity_rules_file /etc/nginx/modsecurity.conf;\n")
 	} else {
 		fmt.Fprint(b, "    modsecurity off;\n")
+	}
+	for _, d := range h.Directives {
+		if d.Key != "" {
+			fmt.Fprintf(b, "    %s %s;\n", d.Key, d.Value)
+		}
 	}
 	if h.ServerSnippet != "" {
 		fmt.Fprintf(b, "    # server snippet\n%s\n", indent(h.ServerSnippet))

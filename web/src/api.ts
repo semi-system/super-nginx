@@ -29,6 +29,7 @@ export type Host = {
   access_list_id: number
   cache: boolean
   cache_time: string
+  directives: { key: string; value: string }[]
   server_snippet: string
   location_snippet: string
   enabled: boolean
