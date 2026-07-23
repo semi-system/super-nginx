@@ -2,6 +2,7 @@
 // lock store -> validate + mutate state -> engine.Apply (render, nginx -t,
 // reload; auto-rollback) -> save. A failed apply reloads state from disk so
 // memory never drifts from the last good config.
+//
 package api
 
 import (
