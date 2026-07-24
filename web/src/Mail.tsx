@@ -14,6 +14,8 @@ const emptyListener: MailListener = {
   enabled: true,
 }
 
+const knownProtocols = ['smtp', 'imap', 'pop3']
+
 const emptyDomain: MailDomain = { id: 0, domain: '', backend: '', cert_id: 0 }
 
 export default function Mail() {
@@ -168,12 +170,21 @@ export default function Mail() {
         <form className="editor" onSubmit={(e) => { e.preventDefault(); saveL() }}>
           <h3>{editL.id ? 'Edit listener' : 'New listener'}</h3>
           <Row label="Protocol (display only)">
-            <select value={editL.label} onChange={(e) => setEditL({ ...editL, label: e.target.value })}>
+            <select
+              value={knownProtocols.includes(editL.label) ? editL.label : 'other'}
+              onChange={(e) => setEditL({ ...editL, label: e.target.value === 'other' ? '' : e.target.value })}
+            >
               <option value="smtp">smtp</option>
               <option value="imap">imap</option>
               <option value="pop3">pop3</option>
+              <option value="other">other…</option>
             </select>
           </Row>
+          {!knownProtocols.includes(editL.label) && (
+            <Row label="Custom protocol name">
+              <input value={editL.label} onChange={(e) => setEditL({ ...editL, label: e.target.value })} />
+            </Row>
+          )}
           <Row label="Container port (>1024; map from host, e.g. 465 → 2465)">
             <input type="number" value={editL.port} onChange={(e) => setEditL({ ...editL, port: +e.target.value })} />
           </Row>
