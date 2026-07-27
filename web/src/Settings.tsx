@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { get, post, put } from './api'
 import { Err, Row, Check, useAsync } from './ui'
 
@@ -9,6 +9,7 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
   const [newPw, setNewPw] = useState('')
   const [backupPw, setBackupPw] = useState('')
   const [msg, setMsg] = useState('')
+  const fileInput = useRef<HTMLInputElement>(null)
   const { error, busy, run } = useAsync()
 
   useEffect(() => {
@@ -108,30 +109,30 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
           >
             Download backup
           </button>
-          <label>
-            <input
-              type="file"
-              accept=".snb"
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (!f || !confirm('Restore this backup? Current data will be replaced.')) return
-                run(async () => {
-                  const res = await fetch('/api/v1/restore', {
-                    method: 'POST',
-                    headers: { 'X-Backup-Password': backupPw },
-                    body: f,
-                  })
-                  const data = await res.json()
-                  if (!res.ok) throw new Error(data.error || res.statusText)
-                  setMsg(`Restored (${data.files} cert files)`)
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".snb"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              e.target.value = '' // so picking the same file twice still fires
+              if (!f || !confirm('Restore this backup? Current data will be replaced.')) return
+              run(async () => {
+                const res = await fetch('/api/v1/restore', {
+                  method: 'POST',
+                  headers: { 'X-Backup-Password': backupPw },
+                  body: f,
                 })
-              }}
-            />
-            <button type="button" onClick={(e) => (e.currentTarget.parentElement!.querySelector('input') as HTMLInputElement).click()}>
-              Restore from file…
-            </button>
-          </label>
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.error || res.statusText)
+                setMsg(`Restored (${data.files} cert files)`)
+              })
+            }}
+          />
+          <button type="button" onClick={() => fileInput.current?.click()}>
+            Restore from file…
+          </button>
         </div>
       </div>
 

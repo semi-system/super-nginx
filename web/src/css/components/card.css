@@ -1,0 +1,40 @@
+/* ==========================================================================
+   card.css — Content card
+   ========================================================================== */
+
+.card {
+  background-color: var(--bg-surface);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius);
+  margin-bottom: var(--content-gap);
+  font-weight: var(--fw-light);
+  overflow: hidden;
+}
+
+/* Card title (keeps .title from the original pen and standard .card-header) */
+.card > .title,
+.card-header {
+  padding: 15px 20px;
+  border-bottom: var(--border-width) solid var(--border-color);
+  color: var(--text-heading);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-medium);
+}
+
+.card > .content,
+.card-body {
+  padding: var(--space-4) var(--space-5);
+}
+
+.card-footer {
+  padding: var(--space-3) var(--space-5);
+  border-top: var(--border-width) solid var(--border-color);
+  background: var(--bg-muted);
+}
+
+/* Card with a top image */
+.card-img-top { width: 100%; object-fit: cover; }
+
+/* Subtle lift on hover (optional) */
+.card-hover { transition: var(--transition); }
+.card-hover:hover { box-shadow: var(--shadow); transform: translateY(-2px); }

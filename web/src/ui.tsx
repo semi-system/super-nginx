@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { pageCount, clampPage, pageSlice, pageWindow } from './paging'
 
-// Tiny shared form helpers — no UI library.
+// Tiny shared form helpers — no UI library, just the S!mple design system classes.
 
 // Modal: overlay + centered box. Backdrop click or Escape closes.
 export function Modal({ onClose, children }: { onClose: () => void; children: any }) {
@@ -10,8 +11,8 @@ export function Modal({ onClose, children }: { onClose: () => void; children: an
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
   return (
-    <div className="modal-overlay" onMouseDown={onClose}>
-      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop open" onMouseDown={onClose}>
+      <div className="modal modal-lg" onMouseDown={(e) => e.stopPropagation()}>
         {children}
       </div>
     </div>
@@ -46,6 +47,54 @@ export function Check({
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       {label}
     </label>
+  )
+}
+
+// Client-side paging for a list already held in memory.
+export function usePaged<T>(items: T[], size = 10) {
+  const [page, setPage] = useState(1)
+  const pages = pageCount(items.length, size)
+  const current = clampPage(page, pages)
+  const rows = useMemo(() => pageSlice(items, current, size), [items, current, size])
+  return { rows, page: current, pages, setPage, total: items.length, size }
+}
+
+type Paged = ReturnType<typeof usePaged<any>>
+
+// Row count + page buttons. Renders nothing while everything fits on one page.
+export function Pagination({ page, pages, setPage, total, size }: Paged) {
+  if (pages < 2) return null
+  const from = (page - 1) * size + 1
+  return (
+    <div className="pager">
+      <span className="pager-info">
+        {from}–{Math.min(page * size, total)} of {total}
+      </span>
+      <div className="pagination">
+        <button onClick={() => setPage(page - 1)} disabled={page === 1} aria-label="Previous page">
+          ‹
+        </button>
+        {pageWindow(page, pages).map((p, i) =>
+          p === '…' ? (
+            <span key={`gap${i}`} className="ellipsis">
+              …
+            </span>
+          ) : (
+            <button
+              key={p}
+              className={p === page ? 'active' : ''}
+              aria-current={p === page ? 'page' : undefined}
+              onClick={() => setPage(p)}
+            >
+              {p}
+            </button>
+          ),
+        )}
+        <button onClick={() => setPage(page + 1)} disabled={page === pages} aria-label="Next page">
+          ›
+        </button>
+      </div>
+    </div>
   )
 }
 

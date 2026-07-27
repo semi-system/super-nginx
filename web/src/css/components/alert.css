@@ -1,0 +1,73 @@
+/* ==========================================================================
+   alert.css — Alerts + badges
+   ========================================================================== */
+
+.alert {
+  --alert-color: var(--color-info);
+  position: relative;
+  padding: 0.85rem 1rem;
+  margin-bottom: var(--space-4);
+  border: var(--border-width) solid transparent;
+  border-left: 3px solid var(--alert-color);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--alert-color) 10%, var(--bg-surface));
+  color: var(--text-heading);
+  font-size: var(--fs-sm);
+}
+.alert-primary { --alert-color: var(--color-primary); }
+.alert-info    { --alert-color: var(--color-info); }
+.alert-success { --alert-color: var(--color-success); }
+.alert-warning { --alert-color: var(--color-warning); }
+.alert-danger  { --alert-color: var(--color-danger); }
+
+.alert-dismissible { padding-right: 2.5rem; }
+.alert .close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.alert .close:hover { opacity: 1; }
+
+/* ==========================================================================
+   BADGE
+   ========================================================================== */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25em 0.6em;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  border-radius: var(--radius);
+  background: var(--color-secondary);
+  color: #fff;
+}
+.badge-pill { border-radius: var(--radius-pill); }
+.badge-primary { background: var(--color-primary); }
+.badge-info    { background: var(--color-info); }
+.badge-success { background: var(--color-success); }
+.badge-warning { background: var(--color-warning); color: var(--on-warning); }
+.badge-danger  { background: var(--color-danger); }
+
+/* Soft badge */
+.badge-soft {
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary);
+}
+
+/* Status dot */
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-secondary);
+}
+.status-dot.online  { background: var(--color-success); }
+.status-dot.busy    { background: var(--color-danger); }
+.status-dot.away    { background: var(--color-warning); }

@@ -1,0 +1,140 @@
+/* ==========================================================================
+   grid.css — Container + 12-column grid (flexbox, mobile-first)
+   Breakpoints: sm 576 · md 768 · lg 992 · xl 1200
+   Bootstrap-compatible syntax: .row .col-6 .col-md-4 ...
+   ========================================================================== */
+
+.container,
+.container-fluid {
+  width: 100%;
+  margin-inline: auto;
+  padding-inline: var(--space-4);
+}
+
+/* Container max-width per breakpoint (fluid stays 100%) */
+@media (min-width: 576px)  { .container { max-width: 540px; } }
+@media (min-width: 768px)  { .container { max-width: 720px; } }
+@media (min-width: 992px)  { .container { max-width: 960px; } }
+@media (min-width: 1200px) { .container { max-width: 1140px; } }
+@media (min-width: 1400px) { .container { max-width: 1320px; } }
+
+/* ---- Row ------------------------------------------------------------- */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  margin-inline: calc(var(--grid-gutter) / -2);
+}
+
+.row > [class*="col-"],
+.row > .col {
+  padding-inline: calc(var(--grid-gutter) / 2);
+  width: 100%;
+}
+
+/* Gutter helpers */
+.row.g-0 { margin-inline: 0; }
+.row.g-0 > [class*="col-"],
+.row.g-0 > .col { padding-inline: 0; }
+
+/* ---- Flexible / auto columns ---------------------------------------------- */
+.col {
+  flex: 1 0 0%;
+}
+.col-auto {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+/* ---- Base 12 columns (all sizes) ------------------------------------ */
+.col-1  { flex: 0 0 auto; width: 8.3333%; }
+.col-2  { flex: 0 0 auto; width: 16.6667%; }
+.col-3  { flex: 0 0 auto; width: 25%; }
+.col-4  { flex: 0 0 auto; width: 33.3333%; }
+.col-5  { flex: 0 0 auto; width: 41.6667%; }
+.col-6  { flex: 0 0 auto; width: 50%; }
+.col-7  { flex: 0 0 auto; width: 58.3333%; }
+.col-8  { flex: 0 0 auto; width: 66.6667%; }
+.col-9  { flex: 0 0 auto; width: 75%; }
+.col-10 { flex: 0 0 auto; width: 83.3333%; }
+.col-11 { flex: 0 0 auto; width: 91.6667%; }
+.col-12 { flex: 0 0 auto; width: 100%; }
+
+/* ---- >=576px (sm) ----------------------------------------------------- */
+@media (min-width: 576px) {
+  .col-sm      { flex: 1 0 0%; width: auto; }
+  .col-sm-auto { flex: 0 0 auto; width: auto; }
+  .col-sm-1  { flex: 0 0 auto; width: 8.3333%; }
+  .col-sm-2  { flex: 0 0 auto; width: 16.6667%; }
+  .col-sm-3  { flex: 0 0 auto; width: 25%; }
+  .col-sm-4  { flex: 0 0 auto; width: 33.3333%; }
+  .col-sm-5  { flex: 0 0 auto; width: 41.6667%; }
+  .col-sm-6  { flex: 0 0 auto; width: 50%; }
+  .col-sm-7  { flex: 0 0 auto; width: 58.3333%; }
+  .col-sm-8  { flex: 0 0 auto; width: 66.6667%; }
+  .col-sm-9  { flex: 0 0 auto; width: 75%; }
+  .col-sm-10 { flex: 0 0 auto; width: 83.3333%; }
+  .col-sm-11 { flex: 0 0 auto; width: 91.6667%; }
+  .col-sm-12 { flex: 0 0 auto; width: 100%; }
+}
+
+/* ---- >=768px (md) ----------------------------------------------------- */
+@media (min-width: 768px) {
+  .col-md      { flex: 1 0 0%; width: auto; }
+  .col-md-auto { flex: 0 0 auto; width: auto; }
+  .col-md-1  { flex: 0 0 auto; width: 8.3333%; }
+  .col-md-2  { flex: 0 0 auto; width: 16.6667%; }
+  .col-md-3  { flex: 0 0 auto; width: 25%; }
+  .col-md-4  { flex: 0 0 auto; width: 33.3333%; }
+  .col-md-5  { flex: 0 0 auto; width: 41.6667%; }
+  .col-md-6  { flex: 0 0 auto; width: 50%; }
+  .col-md-7  { flex: 0 0 auto; width: 58.3333%; }
+  .col-md-8  { flex: 0 0 auto; width: 66.6667%; }
+  .col-md-9  { flex: 0 0 auto; width: 75%; }
+  .col-md-10 { flex: 0 0 auto; width: 83.3333%; }
+  .col-md-11 { flex: 0 0 auto; width: 91.6667%; }
+  .col-md-12 { flex: 0 0 auto; width: 100%; }
+}
+
+/* ---- >=992px (lg) ----------------------------------------------------- */
+@media (min-width: 992px) {
+  .col-lg      { flex: 1 0 0%; width: auto; }
+  .col-lg-auto { flex: 0 0 auto; width: auto; }
+  .col-lg-1  { flex: 0 0 auto; width: 8.3333%; }
+  .col-lg-2  { flex: 0 0 auto; width: 16.6667%; }
+  .col-lg-3  { flex: 0 0 auto; width: 25%; }
+  .col-lg-4  { flex: 0 0 auto; width: 33.3333%; }
+  .col-lg-5  { flex: 0 0 auto; width: 41.6667%; }
+  .col-lg-6  { flex: 0 0 auto; width: 50%; }
+  .col-lg-7  { flex: 0 0 auto; width: 58.3333%; }
+  .col-lg-8  { flex: 0 0 auto; width: 66.6667%; }
+  .col-lg-9  { flex: 0 0 auto; width: 75%; }
+  .col-lg-10 { flex: 0 0 auto; width: 83.3333%; }
+  .col-lg-11 { flex: 0 0 auto; width: 91.6667%; }
+  .col-lg-12 { flex: 0 0 auto; width: 100%; }
+}
+
+/* ---- >=1200px (xl) ---------------------------------------------------- */
+@media (min-width: 1200px) {
+  .col-xl      { flex: 1 0 0%; width: auto; }
+  .col-xl-auto { flex: 0 0 auto; width: auto; }
+  .col-xl-1  { flex: 0 0 auto; width: 8.3333%; }
+  .col-xl-2  { flex: 0 0 auto; width: 16.6667%; }
+  .col-xl-3  { flex: 0 0 auto; width: 25%; }
+  .col-xl-4  { flex: 0 0 auto; width: 33.3333%; }
+  .col-xl-5  { flex: 0 0 auto; width: 41.6667%; }
+  .col-xl-6  { flex: 0 0 auto; width: 50%; }
+  .col-xl-7  { flex: 0 0 auto; width: 58.3333%; }
+  .col-xl-8  { flex: 0 0 auto; width: 66.6667%; }
+  .col-xl-9  { flex: 0 0 auto; width: 75%; }
+  .col-xl-10 { flex: 0 0 auto; width: 83.3333%; }
+  .col-xl-11 { flex: 0 0 auto; width: 91.6667%; }
+  .col-xl-12 { flex: 0 0 auto; width: 100%; }
+}
+
+/* ---- Auto-grid: columns auto-fit, no need to declare a count ----------- */
+/* .grid-auto: items auto-flow, min 240px before wrapping.      */
+.grid-auto {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: var(--grid-gutter);
+}

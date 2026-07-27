@@ -1,0 +1,166 @@
+/* ==========================================================================
+   tokens.css — Design tokens (shared root variables)
+   Edit brand / theme / spacing HERE and the whole system follows.
+   ========================================================================== */
+
+:root {
+  /* ---- Brand & semantic colors -------------------------------------- */
+  --color-primary:        #0e9aee;
+  --color-primary-hover:  #0879c8;
+  --color-secondary:      #6c757d;
+  --color-secondary-hover:#5a6268;
+  --color-info:           #17a2b8;
+  --color-info-hover:     #128294;
+  --color-success:        #22c55e;
+  --color-success-hover:  #16a34a;
+  --color-warning:        #ffc107;
+  --color-warning-hover:  #e0a800;
+  --color-danger:         #dc3545;
+  --color-danger-hover:   #c12b3a;
+
+  /* On-color text (text on a colored background) */
+  --on-primary:   #ffffff;
+  --on-secondary: #ffffff;
+  --on-info:      #ffffff;
+  --on-success:   #ffffff;
+  --on-warning:   #212529;
+  --on-danger:    #ffffff;
+
+  /* ---- Surfaces & text ---------------------------------------------- */
+  --bg-body:            #f6f7fb;
+  --bg-surface:         #ffffff;
+  --bg-muted:           #f6f7fb;
+
+  --text-body:          #888da8;
+  --text-heading:       #2b2f3a;
+  --text-muted:         #a5adba;
+  --text-link:          var(--color-primary);
+
+  /* ---- Sidebar (dark) ----------------------------------------------- */
+  --bg-sidebar:         #313644;
+  --bg-sidebar-sub:     #454e62;
+  --bg-logo:            #464e62;
+  --text-sidebar:       #99abb4;
+  --text-sidebar-hover: var(--color-primary);
+  --text-sidebar-active:#ffffff;
+
+  /* ---- Borders ------------------------------------------------------- */
+  --border-color:       #e6ecf5;
+  --border-input:       #d8e0e5;
+  --border-width:       1px;
+
+  /* ---- Radius & shadow (flat, matching the original style) ------------------ */
+  --radius-sm: 2px;
+  --radius:    2px;
+  --radius-lg: 4px;
+  --radius-pill: 999px;
+
+  --shadow-none: none;
+  --shadow-sm:   0 1px 2px rgba(43, 47, 58, 0.06);
+  --shadow:      0 2px 8px rgba(43, 47, 58, 0.08);
+  --shadow-lg:   0 8px 24px rgba(43, 47, 58, 0.12);
+
+  /* ---- Typography ---------------------------------------------------- */
+  --font-sans: 'Roboto', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  --font-mono: 'SFMono-Regular', ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+  --fw-light:   300;
+  --fw-normal:  400;
+  --fw-medium:  500;
+  --fw-bold:    700;
+
+  /* Fluid font sizes (scale with the viewport) */
+  --fs-xs:   0.75rem;                              /* 12px */
+  --fs-sm:   0.8125rem;                            /* 13px */
+  --fs-base: 0.9375rem;                            /* 15px */
+  --fs-lg:   clamp(1rem, 0.95rem + 0.3vw, 1.125rem);
+  --fs-xl:   clamp(1.125rem, 1rem + 0.6vw, 1.375rem);
+  --fs-2xl:  clamp(1.375rem, 1.1rem + 1.2vw, 1.875rem);
+  --fs-3xl:  clamp(1.75rem, 1.3rem + 2vw, 2.5rem);
+
+  --lh-tight:  1.25;
+  --lh-base:   1.6;
+  --letter-spacing: 0.2px;
+
+  /* ---- Spacing scale (4px base) ------------------------------------- */
+  --space-0: 0;
+  --space-1: 0.25rem;   /* 4  */
+  --space-2: 0.5rem;    /* 8  */
+  --space-3: 0.75rem;   /* 12 */
+  --space-4: 1rem;      /* 16 */
+  --space-5: 1.5rem;    /* 24 */
+  --space-6: 2rem;      /* 32 */
+  --space-7: 3rem;      /* 48 */
+  --space-8: 4rem;      /* 64 */
+
+  /* ---- Layout dimensions -------------------------------------------- */
+  --sidebar-width:           280px;
+  --sidebar-width-collapsed: 60px;
+  --header-height:           60px;
+  --content-gap:             1.5rem;
+
+  /* ---- Motion -------------------------------------------------------- */
+  --transition:      all 0.3s ease-in-out;
+  --transition-fast: all 0.15s ease;
+
+  /* ---- Z-index scale ------------------------------------------------- */
+  --z-base:     1;
+  --z-sidebar:  2;
+  --z-header:   3;
+  --z-logo:     4;
+  --z-overlay:  900;
+  --z-drawer:   1000;
+  --z-modal:    1100;
+  --z-tooltip:  1200;
+
+  /* ---- Grid ---------------------------------------------------------- */
+  --grid-columns: 12;
+  --grid-gutter:  1.5rem;
+}
+
+/* ==========================================================================
+   Dark theme — enable via <html data-theme="dark"> or follow the OS
+   ========================================================================== */
+:root[data-theme="dark"] {
+  --bg-body:      #1a1d24;
+  --bg-surface:   #242833;
+  --bg-muted:     #1f232c;
+
+  --text-body:    #a5adba;
+  --text-heading: #f1f3f7;
+  --text-muted:   #6c7484;
+
+  --border-color: #333947;
+  --border-input: #3a4150;
+
+  --bg-sidebar:     #1f232c;
+  --bg-sidebar-sub: #2b303c;
+  --bg-logo:        #2b303c;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow:    0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-body:      #1a1d24;
+    --bg-surface:   #242833;
+    --bg-muted:     #1f232c;
+
+    --text-body:    #a5adba;
+    --text-heading: #f1f3f7;
+    --text-muted:   #6c7484;
+
+    --border-color: #333947;
+    --border-input: #3a4150;
+
+    --bg-sidebar:     #1f232c;
+    --bg-sidebar-sub: #2b303c;
+    --bg-logo:        #2b303c;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow:    0 2px 8px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.45);
+  }
+}

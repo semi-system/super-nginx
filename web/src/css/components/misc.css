@@ -1,0 +1,130 @@
+/* ==========================================================================
+   misc.css — Avatar, progress, spinner, tooltip, list-group, chip
+   ========================================================================== */
+
+/* ---- Avatar ---------------------------------------------------------- */
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: #fff;
+  font-weight: var(--fw-medium);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.avatar-sm { width: 28px; height: 28px; font-size: var(--fs-xs); }
+.avatar-lg { width: 56px; height: 56px; font-size: var(--fs-lg); }
+.avatar-group { display: inline-flex; }
+.avatar-group .avatar + .avatar { margin-left: -12px; border: 2px solid var(--bg-surface); }
+
+/* ---- Progress -------------------------------------------------------- */
+.progress {
+  height: 8px;
+  background: var(--bg-muted);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.progress-bar {
+  height: 100%;
+  width: 0;
+  background: var(--color-primary);
+  border-radius: inherit;
+  transition: width 0.4s ease;
+}
+.progress-bar.info    { background: var(--color-info); }
+.progress-bar.success { background: var(--color-success); }
+.progress-bar.warning { background: var(--color-warning); }
+.progress-bar.danger  { background: var(--color-danger); }
+
+/* ---- Spinner --------------------------------------------------------- */
+.spinner {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border: 3px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.spinner-sm { width: 16px; height: 16px; border-width: 2px; }
+.spinner-lg { width: 40px; height: 40px; border-width: 4px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- Tooltip (pure CSS, hover) --------------------------------------- */
+[data-tooltip] { position: relative; }
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: var(--text-heading);
+  color: var(--bg-surface);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  border-radius: var(--radius);
+  opacity: 0;
+  visibility: hidden;
+  transition: var(--transition-fast);
+  z-index: var(--z-tooltip);
+  pointer-events: none;
+}
+[data-tooltip]:hover::after { opacity: 1; visibility: visible; }
+
+/* ---- List group ------------------------------------------------------ */
+.list-group {
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+.list-group-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0.75rem 1rem;
+  border-bottom: var(--border-width) solid var(--border-color);
+  transition: var(--transition-fast);
+}
+.list-group-item:last-child { border-bottom: 0; }
+.list-group-item.action { cursor: pointer; }
+.list-group-item.action:hover { background: var(--bg-muted); }
+.list-group-item.active { background: var(--color-primary); color: #fff; }
+
+/* ---- Chip / tag ------------------------------------------------------ */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.25rem 0.65rem;
+  background: var(--bg-muted);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  color: var(--text-body);
+}
+.chip .chip-close { cursor: pointer; opacity: 0.6; }
+.chip .chip-close:hover { opacity: 1; }
+
+/* ---- Divider with text -------------------------------------------------- */
+.divider-text {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  margin: var(--space-4) 0;
+}
+.divider-text::before,
+.divider-text::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}

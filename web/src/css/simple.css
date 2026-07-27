@@ -1,0 +1,29 @@
+/* ==========================================================================
+   simple.css — MASTER file of the "S!mple" design system.
+   Vendored from https://morningstar-sudo.github.io/css-design/ — keep the
+   files under src/css/ unmodified so the system can be re-synced upstream.
+   App-specific glue lives in src/app.css.
+
+   Import order matters: tokens -> reset -> base -> layout -> components.
+   ========================================================================== */
+
+/* Foundation */
+@import "./tokens.css";
+@import "./reset.css";
+@import "./base.css";
+
+/* Layout */
+@import "./grid.css";
+@import "./utilities.css";
+
+/* Components */
+@import "./components/buttons.css";
+@import "./components/forms.css";
+@import "./components/check-radio.css";
+@import "./components/card.css";
+@import "./components/table.css";
+@import "./components/alert.css";
+@import "./components/nav.css";
+@import "./components/modal.css";
+@import "./components/misc.css";
+@import "./components/dashboard.css";

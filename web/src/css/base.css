@@ -1,0 +1,71 @@
+/* ==========================================================================
+   base.css — Base typography: body, heading, text, link, images
+   ========================================================================== */
+
+body {
+  font-family: var(--font-sans);
+  font-weight: var(--fw-light);
+  font-size: var(--fs-base);
+  letter-spacing: var(--letter-spacing);
+  color: var(--text-body);
+  background-color: var(--bg-body);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* ---- Headings -------------------------------------------------------- */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text-heading);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-tight);
+  margin-bottom: var(--space-3);
+}
+
+h1 { font-size: var(--fs-3xl); }
+h2 { font-size: var(--fs-2xl); }
+h3 { font-size: var(--fs-xl); }
+h4 { font-size: var(--fs-lg); }
+h5 { font-size: var(--fs-base); }
+h6 { font-size: var(--fs-sm); }
+
+/* ---- Text ------------------------------------------------------------ */
+p {
+  margin-bottom: var(--space-3);
+}
+
+small { font-size: var(--fs-sm); }
+
+strong, b { font-weight: var(--fw-medium); }
+
+a {
+  color: var(--text-link);
+  transition: color var(--transition-fast);
+}
+a:hover { color: var(--color-primary-hover); }
+
+code, kbd, samp, pre {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+}
+
+code {
+  background: var(--bg-muted);
+  padding: 0.1em 0.4em;
+  border-radius: var(--radius-sm);
+  color: var(--text-heading);
+}
+
+hr {
+  border: 0;
+  border-top: var(--border-width) solid var(--border-color);
+  margin: var(--space-5) 0;
+}
+
+::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+::selection {
+  background: var(--color-primary);
+  color: var(--on-primary);
+}

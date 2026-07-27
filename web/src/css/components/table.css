@@ -1,0 +1,40 @@
+/* ==========================================================================
+   table.css — Data table
+   ========================================================================== */
+
+.table {
+  width: 100%;
+  background: var(--bg-surface);
+  color: var(--text-body);
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: var(--border-width) solid var(--border-color);
+}
+
+.table thead th {
+  color: var(--text-heading);
+  font-weight: var(--fw-medium);
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  background: var(--bg-muted);
+}
+
+.table tbody tr { transition: background var(--transition-fast); }
+.table-hover tbody tr:hover { background: var(--bg-muted); }
+.table-striped tbody tr:nth-child(odd) { background: var(--bg-muted); }
+.table-bordered th,
+.table-bordered td { border: var(--border-width) solid var(--border-color); }
+
+/* Horizontal scroll on mobile — wrap the table in .table-responsive */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}

@@ -4,53 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>super-nginx</title>
-    <style>
-      * { box-sizing: border-box; }
-      body { margin: 0; font-family: system-ui, sans-serif; color: #1a1a2e; background: #f5f6fa; }
-      nav { display: flex; gap: 4px; align-items: center; background: #1a1a2e; padding: 0 16px; }
-      nav .brand { color: #7ee787; font-weight: 700; margin-right: 16px; }
-      nav a { color: #cfd3dc; padding: 12px 12px; cursor: pointer; user-select: none; }
-      nav a.active, nav a:hover { color: #fff; background: #2d2d44; }
-      main { max-width: 960px; margin: 0 auto; padding: 16px; }
-      h2, h3 { margin: 12px 0 8px; }
-      table { width: 100%; border-collapse: collapse; background: #fff; margin: 8px 0 16px; }
-      th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e3e5ec; font-size: 14px; }
-      th { background: #eceef4; }
-      button { padding: 6px 12px; border: 1px solid #c6cad6; border-radius: 4px; background: #fff; cursor: pointer; }
-      button[type='submit'] { background: #1a7f37; color: #fff; border-color: #1a7f37; }
-      button:disabled { opacity: 0.5; }
-      .bar { display: flex; gap: 8px; align-items: center; margin: 12px 0; }
-      .bar h2, .bar h3 { flex: 1; margin: 0; }
-      .editor { background: #fff; border: 1px solid #d9dce5; border-radius: 6px; padding: 16px; margin: 12px 0; }
-      .modal-overlay { position: fixed; inset: 0; background: rgba(20,20,31,.5); display: flex; align-items: flex-start; justify-content: center; padding: 5vh 16px; overflow-y: auto; z-index: 50; }
-      .modal { width: 640px; max-width: 100%; }
-      .modal .editor { margin: 0; }
-      .row { display: block; margin: 10px 0; }
-      .row span { display: block; font-size: 13px; color: #555; margin-bottom: 4px; }
-      .row input, .row select, .row textarea { width: 100%; padding: 7px 9px; border: 1px solid #c6cad6; border-radius: 4px; font: inherit; }
-      .row textarea { font-family: ui-monospace, monospace; font-size: 13px; }
-      .checks { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0; }
-      .check { display: flex; gap: 6px; align-items: center; font-size: 14px; }
-      .error { color: #c62828; }
-      .ok { color: #1a7f37; }
-      .warn { color: #b26a00; }
-      p.warn { background: #fff3e0; padding: 8px 12px; border-radius: 4px; max-width: 960px; margin: 8px auto; }
-      .hint { color: #666; font-size: 13px; }
-      .login { display: flex; justify-content: center; padding-top: 10vh; }
-      .login .editor { width: 360px; }
-      .cards { display: flex; gap: 12px; flex-wrap: wrap; }
-      .card { background: #fff; border: 1px solid #d9dce5; border-radius: 6px; padding: 14px 18px; min-width: 140px; display: flex; flex-direction: column; gap: 6px; }
-      .tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 5px 7px; border: 1px solid #c6cad6; border-radius: 4px; background: #fff; cursor: text; min-height: 36px; }
-      .tag { display: inline-flex; align-items: center; gap: 5px; background: #e3ecff; color: #1a3a7a; border-radius: 3px; padding: 3px 4px 3px 8px; font-size: 13px; }
-      .tag-bad { background: #ffe0e0; color: #a12020; }
-      .tag button { border: none; background: transparent; padding: 0 2px; cursor: pointer; color: inherit; font-size: 12px; line-height: 1; }
-      .tags input { border: none; outline: none; flex: 1; min-width: 120px; padding: 4px; font: inherit; }
-      pre { background: #14141f; color: #d6d8e0; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12.5px; }
-      details summary { cursor: pointer; font-weight: 600; margin: 8px 0; }
-      .footer { text-align: center; padding: 24px 16px; color: #888; font-size: 13px; }
-      .footer a { color: #1a7f37; text-decoration: none; }
-      .footer a:hover { text-decoration: underline; }
-    </style>
+    <!-- Styles come from the S!mple design system (src/css/) via src/app.css. -->
   </head>
   <body>
     <div id="root"></div>

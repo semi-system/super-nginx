@@ -1,0 +1,276 @@
+/* ==========================================================================
+   app.css — super-nginx glue on top of the S!mple design system.
+   Everything here is expressed with the system's tokens; no new colors.
+   Bare <table>/<button>/<input> get the component look so the pages that
+   were written against plain elements keep working.
+   ========================================================================== */
+
+@import "./css/simple.css";
+
+/* ---- Shell ----------------------------------------------------------- */
+/* Layout ids (#logo/#header/#left-menu/#page-container) come from the design
+   system's dashboard.css; only the app-specific bits are set here. */
+#logo { font-size: 20px; font-weight: var(--fw-medium); }
+#logo.small-left-menu { font-size: 16px; }
+
+/* Logo mark for the collapsed sidebar: a cube tumbling on three axes at
+   different rates, so the motion never visibly repeats. Perspective sits on
+   #logo — it is a flex container, so unlike an inline span it can actually
+   establish the 3D context. */
+#logo { gap: 10px; perspective: 100px; }
+
+.logo-cube {
+  --cube: 17px; /* face translateZ is half of this */
+  display: none; /* wordmark only while the sidebar is expanded */
+  position: relative;
+  flex: 0 0 var(--cube);
+  width: var(--cube);
+  height: var(--cube);
+  transform-style: preserve-3d;
+  animation: logo-tumble 3s linear infinite;
+  will-change: transform;
+}
+#logo.small-left-menu .logo-cube { display: block; }
+
+.logo-cube i {
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  opacity: 0.9;
+}
+.logo-cube .front  { background: var(--color-primary);   transform: translateZ(calc(var(--cube) / 2)); }
+.logo-cube .back   { background: var(--color-info);      transform: rotateY(180deg) translateZ(calc(var(--cube) / 2)); }
+.logo-cube .right  { background: var(--color-success);   transform: rotateY(90deg) translateZ(calc(var(--cube) / 2)); }
+.logo-cube .left   { background: var(--color-warning);   transform: rotateY(-90deg) translateZ(calc(var(--cube) / 2)); }
+.logo-cube .top    { background: var(--color-danger);    transform: rotateX(90deg) translateZ(calc(var(--cube) / 2)); }
+.logo-cube .bottom { background: var(--color-secondary); transform: rotateX(-90deg) translateZ(calc(var(--cube) / 2)); }
+
+@keyframes logo-tumble {
+  from { transform: rotateX(0deg) rotateY(0deg) rotateZ(0deg); }
+  to   { transform: rotateX(360deg) rotateY(720deg) rotateZ(180deg); }
+}
+
+/* Reduced motion slows the tumble instead of freezing it — the spin is the
+   logo, so it keeps turning, just gently. */
+@media (prefers-reduced-motion: reduce) {
+  .logo-cube { animation-duration: 13s; }
+}
+
+#left-menu ul li a i.icon { font-size: 18px; font-style: normal; }
+#header .header-right .hint { padding-right: var(--space-2); }
+
+#page-container > section { max-width: 1200px; }
+
+.footer {
+  text-align: center;
+  padding: var(--space-5) var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+.footer a { color: var(--color-primary); }
+.footer a:hover { text-decoration: underline; }
+
+/* Title + actions on one line */
+.bar {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+  margin: var(--space-4) 0;
+}
+.bar h2, .bar h3 { flex: 1; margin: 0; }
+
+/* ---- Cards ----------------------------------------------------------- */
+/* .editor = a card body (forms inside modals and panels) */
+.editor {
+  background: var(--bg-surface);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--content-gap);
+}
+.modal .editor { border: 0; margin: 0; overflow-y: auto; }
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--content-gap);
+  margin-bottom: var(--content-gap);
+}
+/* Stat tile inside .cards — the design system's .card plus centred content */
+.cards .card { margin-bottom: 0; }
+.cards .card .card-body { display: flex; flex-direction: column; gap: var(--space-1); }
+.cards .card b { color: var(--text-muted); font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: 0.4px; }
+.cards .card .stat { color: var(--text-heading); font-size: var(--fs-xl); font-weight: var(--fw-medium); }
+
+/* ---- Forms ----------------------------------------------------------- */
+/* forms.css gives every <label> a bottom margin for stacked forms. The app
+   spaces labels with .row > span instead, so that margin only ever knocked
+   labels out of line with their siblings inside a flex .bar / .checks. */
+label { margin-bottom: 0; }
+
+/* .row is the app's form group; its <span> is the label. */
+.row { display: block; margin-bottom: var(--space-4); }
+.row > span { display: block; margin-bottom: var(--space-2); color: var(--text-heading); font-size: var(--fs-sm); }
+
+input:not([type='checkbox']):not([type='radio']),
+select,
+textarea {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-light);
+  line-height: 1.5;
+  color: var(--text-heading);
+  background-color: var(--bg-surface);
+  border: var(--border-width) solid var(--border-input);
+  border-radius: var(--radius);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+textarea { font-family: var(--font-mono); font-size: var(--fs-sm); resize: vertical; }
+
+.checks { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--space-4); }
+.check { display: flex; gap: var(--space-2); align-items: center; font-size: var(--fs-sm); color: var(--text-heading); }
+.check input { width: auto; accent-color: var(--color-primary); }
+
+/* ---- Buttons: bare <button> renders as .btn ------------------------- */
+button:not(.btn) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 0.5rem 1rem;
+  font-size: var(--fs-base);
+  line-height: 1.5;
+  white-space: nowrap;
+  border: var(--border-width) solid var(--border-input);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text-heading);
+  transition: var(--transition-fast);
+}
+button:not(.btn):hover { background: var(--bg-muted); color: var(--color-primary); border-color: var(--color-primary); }
+button:not(.btn)[type='submit'] {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--on-primary);
+}
+button:not(.btn)[type='submit']:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); color: var(--on-primary); }
+button:disabled { opacity: 0.6; pointer-events: none; }
+
+/* ---- Tables: bare <table> renders as .table ------------------------- */
+table:not(.table) {
+  background: var(--bg-surface);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius);
+  margin-bottom: var(--content-gap);
+}
+th, td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: var(--border-width) solid var(--border-color);
+  font-size: var(--fs-sm);
+}
+thead th {
+  color: var(--text-heading);
+  font-weight: var(--fw-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  background: var(--bg-muted);
+}
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: var(--bg-muted); }
+td button { padding: 0.3rem 0.65rem; font-size: var(--fs-sm); }
+
+/* ---- Status text ----------------------------------------------------- */
+.error { color: var(--color-danger); }
+.ok    { color: var(--color-success); }
+.warn  { color: var(--color-warning); }
+.hint  { color: var(--text-muted); font-size: var(--fs-sm); }
+
+/* ---- Login ----------------------------------------------------------- */
+.login { display: flex; justify-content: center; padding-top: 10vh; }
+.login .editor { width: 360px; max-width: 100%; }
+
+/* ---- Domain tag input ------------------------------------------------ */
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+  padding: 0.35rem 0.5rem;
+  border: var(--border-width) solid var(--border-input);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  cursor: text;
+  min-height: 40px;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.15rem 0.25rem 0.15rem 0.6rem;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary);
+  font-size: var(--fs-sm);
+}
+.tag-bad { background: color-mix(in srgb, var(--color-danger) 14%, transparent); color: var(--color-danger); }
+.tag button { border: 0; background: transparent; padding: 0 var(--space-1); color: inherit; font-size: var(--fs-xs); }
+.tag button:hover { background: transparent; color: inherit; }
+.tags input { border: 0; outline: none; flex: 1; width: auto; min-width: 120px; padding: var(--space-1); background: transparent; box-shadow: none; }
+
+/* ---- Config / code output ------------------------------------------- */
+pre {
+  background: var(--bg-sidebar);
+  color: #d6d8e0;
+  padding: var(--space-4);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  font-size: var(--fs-xs);
+}
+details summary { cursor: pointer; color: var(--text-heading); font-weight: var(--fw-medium); margin: var(--space-2) 0; }
+
+/* ---- Pagination footer under a table -------------------------------- */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin: calc(-1 * var(--space-2)) 0 var(--content-gap);
+}
+.pager .pager-info { color: var(--text-muted); font-size: var(--fs-sm); }
+.card-footer .pager { margin: 0; }
+.pagination button {
+  min-width: 36px;
+  height: 36px;
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: 0;
+  background: var(--bg-surface);
+  color: var(--text-body);
+  font-size: var(--fs-sm);
+}
+.pagination button:hover { background: var(--bg-muted); color: var(--color-primary); border-color: var(--border-color); }
+.pagination button.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+.pagination button:disabled { opacity: 0.5; pointer-events: none; }
+.pagination .ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  color: var(--text-muted);
+}

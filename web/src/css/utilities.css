@@ -1,0 +1,173 @@
+/* ==========================================================================
+   utilities.css — Utility classes: display, flex, spacing, text, responsive
+   ========================================================================== */
+
+/* ---- Display --------------------------------------------------------- */
+.d-none    { display: none !important; }
+.d-inline  { display: inline !important; }
+.d-block   { display: block !important; }
+.d-flex    { display: flex !important; }
+.d-inline-flex { display: inline-flex !important; }
+.d-grid    { display: grid !important; }
+
+/* ---- Float (compatible with the original markup) ---------------------------------- */
+.float-left  { float: left !important; }
+.float-right { float: right !important; }
+.clearfix::after { content: ""; display: block; clear: both; }
+
+/* ---- Flex helpers ---------------------------------------------------- */
+.flex-row     { flex-direction: row !important; }
+.flex-column  { flex-direction: column !important; }
+.flex-wrap    { flex-wrap: wrap !important; }
+.flex-nowrap  { flex-wrap: nowrap !important; }
+.flex-fill    { flex: 1 1 auto !important; }
+.justify-start   { justify-content: flex-start !important; }
+.justify-center  { justify-content: center !important; }
+.justify-end     { justify-content: flex-end !important; }
+.justify-between { justify-content: space-between !important; }
+.justify-around  { justify-content: space-around !important; }
+.align-start   { align-items: flex-start !important; }
+.align-center  { align-items: center !important; }
+.align-end     { align-items: flex-end !important; }
+.gap-1 { gap: var(--space-1) !important; }
+.gap-2 { gap: var(--space-2) !important; }
+.gap-3 { gap: var(--space-3) !important; }
+.gap-4 { gap: var(--space-4) !important; }
+.gap-5 { gap: var(--space-5) !important; }
+
+/* ---- Text ------------------------------------------------------------ */
+.text-left   { text-align: left !important; }
+.text-center { text-align: center !important; }
+.text-right  { text-align: right !important; }
+.text-nowrap { white-space: nowrap !important; }
+.text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.text-muted   { color: var(--text-muted) !important; }
+.text-primary { color: var(--color-primary) !important; }
+.text-danger  { color: var(--color-danger) !important; }
+.text-success { color: var(--color-success) !important; }
+.text-warning { color: var(--color-warning) !important; }
+.text-info    { color: var(--color-info) !important; }
+.fw-light  { font-weight: var(--fw-light) !important; }
+.fw-normal { font-weight: var(--fw-normal) !important; }
+.fw-medium { font-weight: var(--fw-medium) !important; }
+.fw-bold   { font-weight: var(--fw-bold) !important; }
+
+/* ---- Background ------------------------------------------------------ */
+.bg-surface { background-color: var(--bg-surface) !important; }
+.bg-muted   { background-color: var(--bg-muted) !important; }
+.bg-primary { background-color: var(--color-primary) !important; color: var(--on-primary); }
+
+/* ---- Width / height -------------------------------------------------- */
+.w-100 { width: 100% !important; }
+.w-auto { width: auto !important; }
+.h-100 { height: 100% !important; }
+.mw-100 { max-width: 100% !important; }
+
+/* ---- Rounded / shadow ------------------------------------------------ */
+.rounded     { border-radius: var(--radius) !important; }
+.rounded-lg  { border-radius: var(--radius-lg) !important; }
+.rounded-pill{ border-radius: var(--radius-pill) !important; }
+.rounded-0   { border-radius: 0 !important; }
+.shadow-none { box-shadow: none !important; }
+.shadow-sm   { box-shadow: var(--shadow-sm) !important; }
+.shadow      { box-shadow: var(--shadow) !important; }
+.shadow-lg   { box-shadow: var(--shadow-lg) !important; }
+.border      { border: var(--border-width) solid var(--border-color) !important; }
+.border-0    { border: 0 !important; }
+
+/* ---- Spacing (margin / padding), thang 0..8 -------------------------- */
+/* m/p + t/r/b/l/x/y + number. e.g. .mt-3 .px-4 .mb-0                       */
+.m-0 { margin: var(--space-0) !important; }
+.m-1 { margin: var(--space-1) !important; }
+.m-2 { margin: var(--space-2) !important; }
+.m-3 { margin: var(--space-3) !important; }
+.m-4 { margin: var(--space-4) !important; }
+.m-5 { margin: var(--space-5) !important; }
+.m-6 { margin: var(--space-6) !important; }
+.m-auto { margin: auto !important; }
+
+.mt-0 { margin-top: var(--space-0) !important; }
+.mt-1 { margin-top: var(--space-1) !important; }
+.mt-2 { margin-top: var(--space-2) !important; }
+.mt-3 { margin-top: var(--space-3) !important; }
+.mt-4 { margin-top: var(--space-4) !important; }
+.mt-5 { margin-top: var(--space-5) !important; }
+.mt-6 { margin-top: var(--space-6) !important; }
+
+.mb-0 { margin-bottom: var(--space-0) !important; }
+.mb-1 { margin-bottom: var(--space-1) !important; }
+.mb-2 { margin-bottom: var(--space-2) !important; }
+.mb-3 { margin-bottom: var(--space-3) !important; }
+.mb-4 { margin-bottom: var(--space-4) !important; }
+.mb-5 { margin-bottom: var(--space-5) !important; }
+.mb-6 { margin-bottom: var(--space-6) !important; }
+
+.ml-auto { margin-left: auto !important; }
+.mr-auto { margin-right: auto !important; }
+.mx-auto { margin-inline: auto !important; }
+
+.p-0 { padding: var(--space-0) !important; }
+.p-1 { padding: var(--space-1) !important; }
+.p-2 { padding: var(--space-2) !important; }
+.p-3 { padding: var(--space-3) !important; }
+.p-4 { padding: var(--space-4) !important; }
+.p-5 { padding: var(--space-5) !important; }
+.p-6 { padding: var(--space-6) !important; }
+
+.pt-1 { padding-top: var(--space-1) !important; }
+.pt-2 { padding-top: var(--space-2) !important; }
+.pt-3 { padding-top: var(--space-3) !important; }
+.pt-4 { padding-top: var(--space-4) !important; }
+
+.px-2 { padding-inline: var(--space-2) !important; }
+.px-3 { padding-inline: var(--space-3) !important; }
+.px-4 { padding-inline: var(--space-4) !important; }
+.py-2 { padding-block: var(--space-2) !important; }
+.py-3 { padding-block: var(--space-3) !important; }
+.py-4 { padding-block: var(--space-4) !important; }
+
+.pl-1 { padding-left: var(--space-1) !important; }
+
+/* ==========================================================================
+   RESPONSIVE UTILITIES — hide/show & display per breakpoint
+   ========================================================================== */
+
+/* >=576px */
+@media (min-width: 576px) {
+  .d-sm-none   { display: none !important; }
+  .d-sm-block  { display: block !important; }
+  .d-sm-flex   { display: flex !important; }
+  .d-sm-inline { display: inline !important; }
+}
+/* >=768px */
+@media (min-width: 768px) {
+  .d-md-none   { display: none !important; }
+  .d-md-block  { display: block !important; }
+  .d-md-flex   { display: flex !important; }
+  .d-md-inline { display: inline !important; }
+}
+/* >=992px */
+@media (min-width: 992px) {
+  .d-lg-none   { display: none !important; }
+  .d-lg-block  { display: block !important; }
+  .d-lg-flex   { display: flex !important; }
+  .d-lg-inline { display: inline !important; }
+}
+/* >=1200px */
+@media (min-width: 1200px) {
+  .d-xl-none   { display: none !important; }
+  .d-xl-block  { display: block !important; }
+  .d-xl-flex   { display: flex !important; }
+}
+
+/* Show only below a threshold (handy for the mobile menu) */
+@media (max-width: 991.98px) {
+  .hide-below-lg { display: none !important; }
+}
+@media (min-width: 992px) {
+  .show-below-lg { display: none !important; }
+}
