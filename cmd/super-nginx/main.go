@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/morningstar-sudo/super-nginx/internal/api"
 	"github.com/morningstar-sudo/super-nginx/internal/certs"
@@ -95,5 +96,10 @@ func serveUI(st *store.Store, sup *supervisor.Supervisor) {
 		addr = ":" + p
 	}
 	log.Printf("super-nginx: UI listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	// The UI is plain HTTP on purpose: TLS is nginx's job on :8443, and this
+	// listener is meant to sit behind it or on a trusted network. See
+	// SECURITY-NOTES.md.
+	// nosemgrep: go.lang.security.audit.net.use-tls
+	log.Fatal(srv.ListenAndServe())
 }

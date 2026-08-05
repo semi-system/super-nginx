@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -21,7 +22,11 @@ import (
 // ---- access lists -----------------------------------------------------------
 
 // htpasswd {SHA} scheme — supported by nginx everywhere, no crypt(3) needed.
+// SHA-1 is weak in the abstract, but this is the format nginx's
+// auth_basic_user_file reads without depending on the base image's libc crypt(3),
+// which the distroless runtime may not provide. See SECURITY-NOTES.md.
 func shaHash(pw string) string {
+	// nosemgrep: go.lang.security.audit.crypto.use_of_weak_crypto.use-of-sha1
 	sum := sha1.Sum([]byte(pw))
 	return "{SHA}" + base64.StdEncoding.EncodeToString(sum[:])
 }
@@ -228,10 +233,39 @@ func (a *API) backup(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition",
 		fmt.Sprintf(`attachment; filename="super-nginx-backup-%s.snb"`, time.Now().Format("20060102-150405")))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// encrypted archive bytes, not markup — Content-Type is explicit, sniffing off.
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter
 	_, _ = w.Write(enc)
 }
 
+// Caps on a restore: the archive is attacker-shaped data even though the endpoint
+// is admin-only, and both the upload and the decompressed members land in memory
+// or on a read-only-rootfs /data with finite room.
+const (
+	maxRestoreFile  = 32 << 20  // per member inside the archive
+	maxRestoreTotal = 256 << 20 // uploaded body, and total bytes written out
+)
+
+// safeBackupPath reports whether a tar member name may be written under /data.
+// fs.ValidPath rejects absolute paths, "", and any unclean form including a ".."
+// element, so no separate traversal check is needed; the roots allowlist does the
+// rest (and rejects the "." that ValidPath lets through).
+func safeBackupPath(name string) (string, bool) {
+	name = filepath.ToSlash(name)
+	if !fs.ValidPath(name) {
+		return "", false
+	}
+	for _, root := range backupBlobRoots {
+		if strings.HasPrefix(name, root+"/") {
+			return name, true
+		}
+	}
+	return name, false
+}
+
 func (a *API) restore(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRestoreTotal)
 	blob, err := io.ReadAll(r.Body)
 	if err != nil {
 		fail(w, 400, "read body: %s", err)
@@ -252,6 +286,7 @@ func (a *API) restore(w http.ResponseWriter, r *http.Request) {
 
 	tr := tar.NewReader(gz)
 	restored := 0
+	written := int64(0)
 	var envelope []byte
 	for {
 		hdr, err := tr.Next()
@@ -262,28 +297,27 @@ func (a *API) restore(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "bad archive: %s", err)
 			return
 		}
-		name := filepath.ToSlash(filepath.Clean(hdr.Name))
-		if hdr.Typeflag != tar.TypeReg || strings.Contains(name, "..") {
+		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
+		name, ok := safeBackupPath(hdr.Name)
 		if name == exportFile {
-			envelope, err = io.ReadAll(tr)
+			// LimitReader caps the decompressed size, which the gzip header does not.
+			envelope, err = io.ReadAll(io.LimitReader(tr, maxRestoreFile+1))
 			if err != nil {
 				fail(w, 400, "read %s: %s", exportFile, err)
 				return
 			}
-			continue
-		}
-		okPrefix := false
-		for _, root := range backupBlobRoots {
-			if strings.HasPrefix(name, root+"/") {
-				okPrefix = true
+			if int64(len(envelope)) > maxRestoreFile {
+				fail(w, 413, "%s exceeds %d bytes", exportFile, maxRestoreFile)
+				return
 			}
-		}
-		if !okPrefix {
 			continue
 		}
-		dst := filepath.Join("/data", name)
+		if !ok {
+			continue
+		}
+		dst := filepath.Join("/data", filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			fail(w, 500, "%s", err)
 			return
@@ -293,12 +327,21 @@ func (a *API) restore(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "%s", err)
 			return
 		}
-		if _, err := io.Copy(f, tr); err != nil {
-			f.Close()
+		n, err := io.Copy(f, io.LimitReader(tr, maxRestoreFile+1))
+		f.Close()
+		if err != nil {
 			fail(w, 500, "%s", err)
 			return
 		}
-		f.Close()
+		if n > maxRestoreFile {
+			fail(w, 413, "%s exceeds %d bytes", name, maxRestoreFile)
+			return
+		}
+		written += n
+		if written > maxRestoreTotal {
+			fail(w, 413, "archive expands past %d bytes", maxRestoreTotal)
+			return
+		}
 		restored++
 	}
 	if envelope == nil {

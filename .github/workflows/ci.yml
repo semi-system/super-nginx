@@ -16,9 +16,12 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      # pinned to the commit a tag pointed at, not the tag itself: a mutable tag
+      # can be repointed at new code, and the step below gets GITHUB_TOKEN with
+      # packages:write. Bump by re-resolving the tag, never by moving back to it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: abxst/actions/strict@v4
+      - uses: abxst/actions/strict@7b5519cb84515aef9ab76705e8edc64bfdd27135 # v4
         with:
           push: ${{ github.event_name != 'pull_request' }}
           registry-username: ${{ github.actor }}

@@ -29,4 +29,7 @@ COPY bridge/mail.d/ /etc/nginx/mail.d/
 COPY bridge/stream.d/ /etc/nginx/stream.d/
 
 EXPOSE 8080 8181 8443
+# the base image already runs nonroot; restated here so it survives a base swap
+# (all listeners are >1024, so no privileged bind is needed)
+USER 65532:65532
 ENTRYPOINT ["/usr/sbin/super-nginx"]
