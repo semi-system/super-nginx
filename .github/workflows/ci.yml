@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: abxst/actions/with-scan@v4
+      - uses: abxst/actions/strict@v4
         with:
           push: ${{ github.event_name != 'pull_request' }}
           registry-username: ${{ github.actor }}
