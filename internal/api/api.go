@@ -354,11 +354,12 @@ func pathID(r *http.Request) (int, error) {
 // setSessionCookie writes (maxAge > 0) or clears (maxAge < 0) the session cookie.
 // Secure is decided per request rather than hardcoded: nginx may terminate TLS in
 // front of us, but the UI is just as often published as plain http on :8181 (see
-// docker-compose.yml), and a hardcoded Secure would silently break login there.
-// See SECURITY-NOTES.md.
-// nosemgrep: go.lang.security.audit.net.cookie-missing-secure
+// docker-compose.yml), and a hardcoded Secure would silently break login there —
+// the browser would drop the cookie and the user would see an unexplained login
+// loop. Hardcode Secure: true once plain-HTTP access stops being supported.
 func setSessionCookie(w http.ResponseWriter, r *http.Request, val string, maxAge int) {
 	https := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	// nosemgrep: go.lang.security.audit.net.cookie-missing-secure.cookie-missing-secure
 	http.SetCookie(w, &http.Cookie{
 		Name: cookieName, Value: val, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, Secure: https, MaxAge: maxAge,
@@ -701,7 +702,7 @@ func (a *API) downloadCert(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, fname+".zip"))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// zip bytes, not markup — Content-Type is explicit and sniffing is off.
-	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 	_, _ = w.Write(buf.Bytes())
 }
 

@@ -24,7 +24,10 @@ import (
 // htpasswd {SHA} scheme — supported by nginx everywhere, no crypt(3) needed.
 // SHA-1 is weak in the abstract, but this is the format nginx's
 // auth_basic_user_file reads without depending on the base image's libc crypt(3),
-// which the distroless runtime may not provide. See SECURITY-NOTES.md.
+// which the distroless runtime may not provide (and Go cannot produce SHA-crypt
+// hashes anyway). Access-list passwords only — admin login uses bcrypt. Switch to
+// bcrypt here if the base image is confirmed to ship crypt(3) with $2y$ support;
+// that invalidates stored hashes, so users must re-enter access-list passwords.
 func shaHash(pw string) string {
 	// nosemgrep: go.lang.security.audit.crypto.use_of_weak_crypto.use-of-sha1
 	sum := sha1.Sum([]byte(pw))
@@ -235,7 +238,7 @@ func (a *API) backup(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf(`attachment; filename="super-nginx-backup-%s.snb"`, time.Now().Format("20060102-150405")))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// encrypted archive bytes, not markup — Content-Type is explicit, sniffing off.
-	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 	_, _ = w.Write(enc)
 }
 
@@ -327,9 +330,11 @@ func (a *API) restore(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "%s", err)
 			return
 		}
-		n, err := io.Copy(f, io.LimitReader(tr, maxRestoreFile+1))
+		// CopyN, not Copy: the gzip header does not bound the decompressed size.
+		// A member shorter than the cap ends with io.EOF, which is the normal case.
+		n, err := io.CopyN(f, tr, maxRestoreFile+1)
 		f.Close()
-		if err != nil {
+		if err != nil && err != io.EOF {
 			fail(w, 500, "%s", err)
 			return
 		}

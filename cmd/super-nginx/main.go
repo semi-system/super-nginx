@@ -98,8 +98,8 @@ func serveUI(st *store.Store, sup *supervisor.Supervisor) {
 	log.Printf("super-nginx: UI listening on %s", addr)
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	// The UI is plain HTTP on purpose: TLS is nginx's job on :8443, and this
-	// listener is meant to sit behind it or on a trusted network. See
-	// SECURITY-NOTES.md.
-	// nosemgrep: go.lang.security.audit.net.use-tls
+	// listener is meant to sit behind it or on a trusted network. Revisit if the
+	// UI ever becomes reachable from the internet without a proxy in front.
+	// nosemgrep: go.lang.security.audit.net.use-tls.use-tls
 	log.Fatal(srv.ListenAndServe())
 }
