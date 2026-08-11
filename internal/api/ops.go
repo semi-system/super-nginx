@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -410,5 +411,39 @@ func (a *API) metrics(w http.ResponseWriter, _ *http.Request) {
 		"reading":   reading,
 		"writing":   writing,
 		"waiting":   waiting,
+	})
+}
+
+// ---- per-host traffic (stats collector) -------------------------------------
+
+// hostStats serves the dashboard chart: hourly request counts per host over the
+// last ?hours (default 24), aligned to a shared bucket array.
+func (a *API) hostStats(w http.ResponseWriter, r *http.Request) {
+	if a.Stats == nil {
+		jsonOut(w, 200, map[string]any{"available": false})
+		return
+	}
+	hours, _ := strconv.Atoi(r.URL.Query().Get("hours"))
+	if hours <= 0 {
+		hours = 24
+	}
+	buckets, per, total := a.Stats.Series(hours, time.Now())
+
+	// label the series with a domain; the chart shows names, not ids
+	names := map[int]string{}
+	a.St.Mu.Lock()
+	for _, h := range a.St.S.Hosts {
+		if len(h.Domains) > 0 {
+			names[h.ID] = h.Domains[0]
+		}
+	}
+	a.St.Mu.Unlock()
+
+	jsonOut(w, 200, map[string]any{
+		"available": true,
+		"buckets":   buckets,
+		"total":     total,
+		"hosts":     per,
+		"names":     names,
 	})
 }

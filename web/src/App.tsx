@@ -1,4 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import {
+  Chart,
+  CategoryScale,
+  Legend,
+  LineController,
+  LineElement,
+  LinearScale,
+  PointElement,
+  Tooltip,
+} from 'chart.js'
 import { get, post } from './api'
 import { Err, Row, useAsync, usePaged, Pagination } from './ui'
 import Hosts from './Hosts'
@@ -8,6 +18,10 @@ import Streams from './Streams'
 import Access from './Access'
 import ConfigView from './ConfigView'
 import Settings from './Settings'
+
+// Registered piecemeal rather than importing 'chart.js/auto', which drags every
+// controller (bar, pie, radar, ...) into the bundle for one line chart.
+Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Legend)
 
 const tabs = ['Dashboard', 'Hosts', 'Certificates', 'Mail', 'Streams', 'Access', 'Config', 'Settings'] as const
 type Tab = (typeof tabs)[number]
@@ -175,12 +189,14 @@ function Login({ onLogin }: { onLogin: (user: string, mustChange: boolean) => vo
 function Dashboard() {
   const [sum, setSum] = useState<any>(null)
   const [met, setMet] = useState<any>(null)
+  const [traffic, setTraffic] = useState<Traffic | null>(null)
   const { error, run } = useAsync()
 
   useEffect(() => {
     run(async () => {
       setSum(await get('/api/v1/summary'))
       setMet(await get('/api/v1/metrics'))
+      setTraffic(await get('/api/v1/stats?hours=24'))
     })
   }, [])
 
@@ -210,7 +226,27 @@ function Dashboard() {
             <Stat label="Total requests">{met.requests}</Stat>
           </>
         )}
+        {traffic?.available && (
+          <>
+            <Stat label="Requests (24h)">{total(traffic.total.hits)}</Stat>
+            <Stat label="Errors (24h)">
+              <span className={total(traffic.total.e5xx) > 0 ? 'error' : ''}>
+                {total(traffic.total.e4xx)} × 4xx / {total(traffic.total.e5xx)} × 5xx
+              </span>
+            </Stat>
+            <Stat label="Sent (24h)">{bytes(total(traffic.total.bytes))}</Stat>
+            <Stat label="Avg response (24h)">{weightedAvg(traffic.total)} ms</Stat>
+          </>
+        )}
       </div>
+      {traffic?.available && Object.keys(traffic.hosts).length > 0 && (
+        <div className="card">
+          <div className="card-header">Per host, hourly (last 24h)</div>
+          <div className="card-body">
+            <TrafficChart data={traffic} />
+          </div>
+        </div>
+      )}
       {certs.length > 0 && (
         <div className="card">
           <div className="card-header">Certificates</div>
@@ -244,6 +280,114 @@ function Dashboard() {
         </div>
       )}
     </section>
+  )
+}
+
+type Metrics = {
+  hits: number[]
+  e4xx: number[]
+  e5xx: number[]
+  bytes: number[]
+  avg_ms: number[]
+}
+
+type Traffic = {
+  available: boolean
+  buckets: number[]
+  total: Metrics
+  hosts: Record<string, Metrics>
+  names: Record<string, string>
+}
+
+type MetricKey = keyof Metrics
+
+const metricLabels: Record<MetricKey, string> = {
+  hits: 'Requests',
+  e4xx: '4xx responses',
+  e5xx: '5xx responses',
+  bytes: 'Bytes sent',
+  avg_ms: 'Avg response time (ms)',
+}
+
+const total = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
+
+// hit-weighted, so a quiet hour with one slow request cannot dominate
+const weightedAvg = (m: Metrics) => {
+  const hits = total(m.hits)
+  return hits ? Math.round(m.avg_ms.reduce((a, ms, i) => a + ms * m.hits[i], 0) / hits) : 0
+}
+
+const bytes = (n: number) => {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let i = 0
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024
+    i++
+  }
+  return `${i === 0 ? n : n.toFixed(1)} ${units[i]}`
+}
+
+// from tokens.css — primary, success, warning, danger, info, secondary
+const palette = ['#0e9aee', '#22c55e', '#ffc107', '#dc3545', '#17a2b8', '#6c757d']
+
+function TrafficChart({ data }: { data: Traffic }) {
+  const ref = useRef<HTMLCanvasElement>(null)
+  const [metric, setMetric] = useState<MetricKey>('hits')
+
+  useEffect(() => {
+    if (!ref.current) return
+    // busiest hosts first, capped so the legend stays readable
+    const hosts = Object.entries(data.hosts)
+      .sort((a, b) => total(b[1].hits) - total(a[1].hits))
+      .slice(0, 6)
+    const chart = new Chart(ref.current, {
+      type: 'line',
+      data: {
+        labels: data.buckets.map((t) =>
+          new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        ),
+        datasets: hosts.map(([id, m], i) => ({
+          label: data.names[id] ?? `host ${id}`,
+          data: m[metric],
+          borderColor: palette[i % palette.length],
+          backgroundColor: palette[i % palette.length],
+          tension: 0.3,
+          pointRadius: 0,
+        })),
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              precision: 0,
+              callback: (v) => (metric === 'bytes' ? bytes(Number(v)) : v),
+            },
+          },
+        },
+      },
+    })
+    // without the destroy a re-render leaves the canvas bound and Chart.js
+    // throws "Canvas is already in use"
+    return () => chart.destroy()
+  }, [data, metric])
+
+  return (
+    <>
+      <select value={metric} onChange={(e) => setMetric(e.target.value as MetricKey)}>
+        {Object.entries(metricLabels).map(([k, label]) => (
+          <option key={k} value={k}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <div style={{ height: 260 }}>
+        <canvas ref={ref} />
+      </div>
+    </>
   )
 }
 

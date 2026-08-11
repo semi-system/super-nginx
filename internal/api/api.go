@@ -27,6 +27,7 @@ import (
 
 	"github.com/morningstar-sudo/super-nginx/internal/certs"
 	"github.com/morningstar-sudo/super-nginx/internal/engine"
+	"github.com/morningstar-sudo/super-nginx/internal/stats"
 	"github.com/morningstar-sudo/super-nginx/internal/store"
 	"github.com/morningstar-sudo/super-nginx/internal/supervisor"
 )
@@ -34,6 +35,8 @@ import (
 type API struct {
 	St  *store.Store
 	Sup *supervisor.Supervisor
+	// Stats is optional: nil simply means the stats endpoint reports no data.
+	Stats *stats.Collector
 
 	sesMu    sync.Mutex
 	sessions map[string]session
@@ -343,6 +346,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	auth("POST /api/v1/restore", a.restore)
 	auth("GET /api/v1/audit", a.auditLog)
 	auth("GET /api/v1/metrics", a.metrics)
+	auth("GET /api/v1/stats", a.hostStats)
 }
 
 func pathID(r *http.Request) (int, error) {

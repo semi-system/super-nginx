@@ -15,6 +15,7 @@ import (
 	"github.com/morningstar-sudo/super-nginx/internal/api"
 	"github.com/morningstar-sudo/super-nginx/internal/certs"
 	"github.com/morningstar-sudo/super-nginx/internal/engine"
+	"github.com/morningstar-sudo/super-nginx/internal/stats"
 	"github.com/morningstar-sudo/super-nginx/internal/store"
 	"github.com/morningstar-sudo/super-nginx/internal/supervisor"
 	"github.com/morningstar-sudo/super-nginx/web"
@@ -55,6 +56,7 @@ func main() {
 	api.EnsureAdmin(st)
 
 	sup := supervisor.New(confPath())
+	sc := stats.New("/data/db/stats.json", func() []int { return hostIDs(st) })
 
 	// render state -> config and test before nginx ever starts; a state that
 	// renders invalid config is a bug and should fail the boot loudly
@@ -66,22 +68,37 @@ func main() {
 	}
 	log.Printf("super-nginx: nginx started (pid %d, conf %s)", sup.Pid(), sup.Conf)
 
+	go sc.Run()
 	go certs.RenewLoop(st, func() error { return engine.Apply(&st.S, sup, true) })
-	go serveUI(st, sup)
+	go serveUI(st, sup, sc)
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
 	select {
 	case err := <-sup.Done():
 		// ponytail: no in-process restart; exit and let the orchestrator restart us
+		sc.Flush()
 		log.Fatalf("nginx exited: %v", err)
 	case s := <-sigs:
 		log.Printf("super-nginx: got %v, stopping nginx gracefully", s)
 		sup.Stop()
+		sc.Flush()
 	}
 }
 
-func serveUI(st *store.Store, sup *supervisor.Supervisor) {
+// hostIDs snapshots the configured host ids so the stats collector can drop
+// counters for hosts that were deleted.
+func hostIDs(st *store.Store) []int {
+	st.Mu.Lock()
+	defer st.Mu.Unlock()
+	ids := make([]int, 0, len(st.S.Hosts))
+	for _, h := range st.S.Hosts {
+		ids = append(ids, h.ID)
+	}
+	return ids
+}
+
+func serveUI(st *store.Store, sup *supervisor.Supervisor, sc *stats.Collector) {
 	dist, err := fs.Sub(web.Dist, "dist")
 	if err != nil {
 		log.Fatalf("embedded UI: %v", err)
@@ -89,7 +106,9 @@ func serveUI(st *store.Store, sup *supervisor.Supervisor) {
 
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServerFS(dist))
-	api.New(st, sup).Register(mux)
+	a := api.New(st, sup)
+	a.Stats = sc
+	a.Register(mux)
 
 	addr := ":8181"
 	if p := os.Getenv("UI_PORT"); p != "" {

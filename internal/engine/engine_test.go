@@ -64,3 +64,39 @@ func TestStreamResolver(t *testing.T) {
 		t.Fatalf("passthrough non-SNI uses literal proxy_pass, no resolver needed, got:\n%s", got)
 	}
 }
+
+// Every user-facing server block must feed the stats collector, including the
+// force_ssl redirect block (which skips writeServerCommon) and the https block.
+// The internal stub_status server must stay out of the counts.
+func TestStatsLogRendered(t *testing.T) {
+	s := &store.State{
+		Certs: []store.Cert{{ID: 1, Name: "c", Type: "custom"}},
+		Hosts: []store.Host{
+			{ID: 9, Type: "proxy", Domains: []string{"a.example.com"}, Target: "http://127.0.0.1:3000",
+				CertID: 1, ForceSSL: true, Enabled: true},
+		},
+	}
+	got := string(renderHTTP(s))
+
+	// field order and count must match stats.parse
+	if !strings.Contains(got, "log_format sn_stats '$sn_hid $status $bytes_sent $request_time';") {
+		t.Fatalf("missing log_format, got:\n%s", got)
+	}
+	if n := strings.Count(got, "set $sn_hid 9;"); n != 2 {
+		t.Fatalf("want $sn_hid in both the :8080 and :8443 blocks, got %d:\n%s", n, got)
+	}
+	if n := strings.Count(got, "access_log syslog:server=127.0.0.1:8514,nohostname,tag=sn sn_stats;"); n != 2 {
+		t.Fatalf("want 2 syslog access_log lines, got %d:\n%s", n, got)
+	}
+	if !strings.Contains(got, "access_log off;") {
+		t.Fatalf("stub_status server must keep access_log off, got:\n%s", got)
+	}
+
+	// With no hosts at all, nginx still has to accept the config: a log_format
+	// naming a variable nothing sets fails with `unknown "sn_hid" variable`, so
+	// the stub_status server carries a placeholder set.
+	empty := string(renderHTTP(&store.State{}))
+	if !strings.Contains(empty, "log_format sn_stats") || !strings.Contains(empty, "set $sn_hid 0;") {
+		t.Fatalf("empty state must still define $sn_hid, got:\n%s", empty)
+	}
+}
