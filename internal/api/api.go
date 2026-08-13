@@ -166,6 +166,26 @@ func checkPort(p int) error {
 	return nil
 }
 
+// checkDefaultSite validates the catch-all site fields. An empty action means
+// "close", so old state files stay valid.
+func checkDefaultSite(set *store.Settings) error {
+	switch set.DefaultAction {
+	case "", "close", "404":
+	case "redirect":
+		u, err := url.Parse(set.DefaultTarget)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("default site redirect target must be an absolute URL")
+		}
+	case "html":
+		if strings.TrimSpace(set.DefaultHTML) == "" {
+			return fmt.Errorf("default site HTML page is empty")
+		}
+	default:
+		return fmt.Errorf("default site action must be close, 404, redirect or html")
+	}
+	return nil
+}
+
 func checkHost(s *store.State, h *store.Host) error {
 	if err := checkDomains(h.Domains); err != nil {
 		return err
@@ -486,17 +506,22 @@ func (a *API) getSettings(w http.ResponseWriter, _ *http.Request) {
 	jsonOut(w, 200, a.St.S.Settings)
 }
 
+// putSettings goes through mutate because the default-site fields are rendered
+// into nginx config: saving them without a re-render would leave the catch-all
+// server stale until some unrelated change happened to trigger an apply.
 func (a *API) putSettings(w http.ResponseWriter, r *http.Request) {
 	var in store.Settings
 	if err := decode(r, &in); err != nil {
 		fail(w, 400, "bad request")
 		return
 	}
-	a.St.Mu.Lock()
-	defer a.St.Mu.Unlock()
-	a.St.S.Settings = in
-	_ = a.St.Save()
-	jsonOut(w, 200, in)
+	a.mutate(w, r, func(s *store.State) error {
+		if err := checkDefaultSite(&in); err != nil {
+			return err
+		}
+		s.Settings = in
+		return nil
+	})
 }
 
 // ---- hosts ------------------------------------------------------------------

@@ -25,6 +25,9 @@ const (
 	// lego's HTTP-01 solver listens here during a challenge; every :8080
 	// server proxies /.well-known/acme-challenge/ to it.
 	ACMEPort = "8402"
+	// custom page for the catch-all server (Settings -> default site, "html")
+	defaultDir   = LiveDir + "/default"
+	defaultIndex = defaultDir + "/index.html"
 )
 
 func CertPath(id int) (fullchain, privkey string) {
@@ -65,7 +68,7 @@ func Apply(s *store.State, sup *supervisor.Supervisor, reload bool) error {
 }
 
 func write(s *store.State) error {
-	for _, d := range []string{"conf.d", "mail.d", "stream.d", "htpasswd"} {
+	for _, d := range []string{"conf.d", "mail.d", "stream.d", "htpasswd", "default"} {
 		dir := filepath.Join(LiveDir, d)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
@@ -95,6 +98,11 @@ func write(s *store.State) error {
 			if err := os.MkdirAll(fmt.Sprintf("/data/cache/%d", h.ID), 0o755); err != nil {
 				return err
 			}
+		}
+	}
+	if s.Settings.DefaultAction == "html" {
+		if err := os.WriteFile(defaultIndex, []byte(s.Settings.DefaultHTML), 0o644); err != nil {
+			return err
 		}
 	}
 	if err := os.WriteFile(filepath.Join(LiveDir, "conf.d", "hosts.conf"), renderHTTP(s), 0o644); err != nil {
@@ -147,6 +155,7 @@ func renderHTTP(s *store.State) []byte {
 	// variable` if a log_format names a variable nothing ever sets. This server
 	// keeps access_log off, so it never actually reports anything.
 	fmt.Fprint(b, "server {\n    listen 127.0.0.1:8090;\n    access_log off;\n    modsecurity off;\n    set $sn_hid 0;\n    location = /stub_status {\n        stub_status;\n    }\n}\n")
+	writeDefaultServer(b, s.Settings)
 	for _, h := range s.Hosts {
 		if !h.Enabled {
 			continue
@@ -154,6 +163,42 @@ func renderHTTP(s *store.State) []byte {
 		writeHost(b, s, h)
 	}
 	return b.Bytes()
+}
+
+// writeDefaultServer renders the catch-all (`server_name _`) pair: what answers
+// a request whose Host — or TLS SNI — matches no configured host. Without it
+// nginx falls back to the base image's welcome page on :8080 and to the first
+// rendered host block on :8443, both of which leak.
+func writeDefaultServer(b *bytes.Buffer, set store.Settings) {
+	fmt.Fprint(b, "\n# default (catch-all) site — Settings -> default site\nserver {\n    listen 8080 default_server;\n    server_name _;\n")
+	// no version/name in error pages or the Server header for unmatched hosts
+	fmt.Fprint(b, "    server_tokens off;\n    modsecurity off;\n    access_log off;\n")
+	// same reason as the stub_status server above: log_format sn_stats names
+	// $sn_hid, so every server must set it even when it logs nothing.
+	fmt.Fprint(b, "    set $sn_hid 0;\n")
+	// unconditional: HTTP-01 issuance for a domain with no host block yet is
+	// answered here, whatever the chosen action.
+	fmt.Fprint(b, acmeLocation)
+	switch set.DefaultAction {
+	case "404":
+		// own body on purpose: nginx's built-in 404 page prints "nginx" in its
+		// footer. An empty string here is not enough — nginx falls back to the
+		// branded page — so return one line of plain text instead. The Server
+		// header still says "nginx"; dropping it needs headers_more, which the
+		// base image does not build in.
+		fmt.Fprint(b, "    location / {\n        default_type text/plain;\n        return 404 \"404 Not Found\";\n    }\n")
+	case "redirect":
+		fmt.Fprintf(b, "    location / {\n        return 301 %s$request_uri;\n    }\n", set.DefaultTarget)
+	case "html":
+		fmt.Fprintf(b, "    root %s;\n    location / {\n        try_files /index.html =404;\n    }\n", defaultDir)
+	default: // close
+		fmt.Fprint(b, "    location / {\n        return 444;\n    }\n")
+	}
+	fmt.Fprint(b, "}\n")
+
+	// Unmatched SNI is dropped at the handshake. ssl_reject_handshake needs no
+	// certificate, so there is nothing to configure and nothing to expire.
+	fmt.Fprint(b, "server {\n    listen 8443 ssl default_server;\n    ssl_reject_handshake on;\n}\n")
 }
 
 // cacheZone is the shared-memory zone name for a host's proxy cache.

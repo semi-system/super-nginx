@@ -103,6 +103,12 @@ type AccessList struct {
 type Settings struct {
 	ACMEEmail   string `json:"acme_email"`
 	ACMEStaging bool   `json:"acme_staging"`
+	// Default (catch-all) site: what answers a request whose Host matches no
+	// configured host. "" behaves as "close", so state files written before
+	// these fields existed need no migration.
+	DefaultAction string `json:"default_action"` // close | 404 | redirect | html
+	DefaultTarget string `json:"default_target"` // redirect: absolute URL
+	DefaultHTML   string `json:"default_html"`   // html: page source
 }
 
 type State struct {

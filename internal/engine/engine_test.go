@@ -100,3 +100,48 @@ func TestStatsLogRendered(t *testing.T) {
 		t.Fatalf("empty state must still define $sn_hid, got:\n%s", empty)
 	}
 }
+
+// The catch-all server must exist for every action, never leak nginx's own
+// pages, and always keep answering ACME challenges.
+func TestDefaultServer(t *testing.T) {
+	cases := []struct {
+		set  store.Settings
+		want string
+	}{
+		{store.Settings{}, "return 444;"},                       // zero value == close
+		{store.Settings{DefaultAction: "close"}, "return 444;"}, //
+		{store.Settings{DefaultAction: "404"}, `return 404 "404 Not Found";`},   //
+		{store.Settings{DefaultAction: "redirect", DefaultTarget: "https://example.com"}, //
+			"return 301 https://example.com$request_uri;"},
+		{store.Settings{DefaultAction: "html", DefaultHTML: "<h1>x</h1>"}, "root " + defaultDir + ";"},
+	}
+	for _, c := range cases {
+		got := string(renderHTTP(&store.State{Settings: c.set}))
+		if !strings.Contains(got, c.want) {
+			t.Fatalf("action %q: want %q, got:\n%s", c.set.DefaultAction, c.want, got)
+		}
+		if !strings.Contains(got, "listen 8080 default_server;") || !strings.Contains(got, "server_name _;") {
+			t.Fatalf("action %q: missing :8080 catch-all, got:\n%s", c.set.DefaultAction, got)
+		}
+		// unmatched SNI is dropped at the handshake instead of falling through
+		// to whichever host block happens to render first
+		if !strings.Contains(got, "listen 8443 ssl default_server;") || !strings.Contains(got, "ssl_reject_handshake on;") {
+			t.Fatalf("action %q: missing :8443 catch-all, got:\n%s", c.set.DefaultAction, got)
+		}
+		if !strings.Contains(got, "location /.well-known/acme-challenge/") {
+			t.Fatalf("action %q: catch-all dropped ACME location, got:\n%s", c.set.DefaultAction, got)
+		}
+		if !strings.Contains(got, "server_tokens off;") {
+			t.Fatalf("action %q: catch-all must not advertise nginx, got:\n%s", c.set.DefaultAction, got)
+		}
+	}
+
+	// nginx rejects a second default_server on the same port, so a rendered host
+	// must never add one.
+	withHost := string(renderHTTP(&store.State{
+		Hosts: []store.Host{{ID: 1, Type: "proxy", Domains: []string{"a.example.com"}, Target: "http://127.0.0.1:1", Enabled: true}},
+	}))
+	if n := strings.Count(withHost, "default_server"); n != 2 {
+		t.Fatalf("want exactly one default_server per port, got %d:\n%s", n, withHost)
+	}
+}

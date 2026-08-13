@@ -18,6 +18,9 @@ Xem [PLAN.md](PLAN.md) — kiến trúc + lộ trình. Trạng thái: **Phase 1�
   port, dùng chung cert với HTTPS host; passthrough cho port plain/STARTTLS;
   auth ở backend
 - Streams TCP/UDP forward
+- Default site (`_`) cấu hình trong Settings: đóng kết nối (444, mặc định) /
+  404 / redirect / trang HTML tự soạn — không còn lộ trang welcome của nginx;
+  HTTPS với SNI lạ bị từ chối ngay ở bước bắt tay TLS
 - Access lists: basic auth (htpasswd) + IP allow/deny, satisfy any/all, gắn per-host
 - Backup/restore (tar.gz: state + certs + ACME account), audit log, metrics stub_status
 - Auth: admin + password random in ra log lần đầu, session cookie/bearer

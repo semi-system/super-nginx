@@ -5,6 +5,9 @@ import { Err, Row, Check, useAsync } from './ui'
 export default function Settings({ onLogout }: { onLogout: () => void }) {
   const [email, setEmail] = useState('')
   const [staging, setStaging] = useState(false)
+  const [defAction, setDefAction] = useState('close')
+  const [defTarget, setDefTarget] = useState('')
+  const [defHTML, setDefHTML] = useState('')
   const [oldPw, setOldPw] = useState('')
   const [newPw, setNewPw] = useState('')
   const [backupPw, setBackupPw] = useState('')
@@ -17,12 +20,23 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
       const s = await get('/api/v1/settings')
       setEmail(s.acme_email || '')
       setStaging(!!s.acme_staging)
+      setDefAction(s.default_action || 'close')
+      setDefTarget(s.default_target || '')
+      setDefHTML(s.default_html || '')
     })
   }, [])
 
+  // one settings object server-side, so every form PUTs all fields — saving the
+  // default site must not blank the ACME email and vice versa
   const saveSettings = () =>
     run(async () => {
-      await put('/api/v1/settings', { acme_email: email, acme_staging: staging })
+      await put('/api/v1/settings', {
+        acme_email: email,
+        acme_staging: staging,
+        default_action: defAction,
+        default_target: defTarget,
+        default_html: defHTML,
+      })
       setMsg('Settings saved')
     })
 
@@ -54,6 +68,43 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
         <div className="checks">
           <Check label="Use staging CA (testing — untrusted certs, high rate limits)" checked={staging} onChange={setStaging} />
         </div>
+        <button type="submit" disabled={busy}>Save</button>
+      </form>
+
+      <form className="editor" onSubmit={(e) => { e.preventDefault(); saveSettings() }}>
+        <h3>Default site (catch-all)</h3>
+        <p className="hint">
+          Answers requests whose domain matches no host — e.g. someone hitting the server by raw
+          IP. Unmatched HTTPS is always rejected at the TLS handshake, and ACME HTTP-01 challenges
+          keep working in every mode.
+        </p>
+        <Row label="Action">
+          <select value={defAction} onChange={(e) => setDefAction(e.target.value)}>
+            <option value="close">Close connection (444) — nothing is sent back</option>
+            <option value="404">Return 404</option>
+            <option value="redirect">Redirect to a URL</option>
+            <option value="html">Custom HTML page</option>
+          </select>
+        </Row>
+        {defAction === 'redirect' && (
+          <Row label="Redirect to">
+            <input
+              value={defTarget}
+              onChange={(e) => setDefTarget(e.target.value)}
+              placeholder="https://example.com"
+            />
+          </Row>
+        )}
+        {defAction === 'html' && (
+          <Row label="Page HTML">
+            <textarea
+              rows={8}
+              value={defHTML}
+              onChange={(e) => setDefHTML(e.target.value)}
+              placeholder="<h1>Nothing here</h1>"
+            />
+          </Row>
+        )}
         <button type="submit" disabled={busy}>Save</button>
       </form>
 
