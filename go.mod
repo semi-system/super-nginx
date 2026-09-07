@@ -1,10 +1,10 @@
 module github.com/morningstar-sudo/super-nginx
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/go-acme/lego/v4 v4.35.2
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 )
 
 require (
