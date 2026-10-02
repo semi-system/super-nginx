@@ -52,8 +52,6 @@ export type MailListener = {
   port: number
   mode: 'terminate' | 'passthrough'
   default_backend: string
-  backend_port: number
-  sni_route: boolean
   proxy_ssl: boolean
   enabled: boolean
 }
@@ -61,7 +59,6 @@ export type MailListener = {
 export type MailDomain = {
   id: number
   domain: string
-  backend: string
   cert_id: number
 }
 

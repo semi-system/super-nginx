@@ -65,18 +65,17 @@ type MailListener struct {
 	Label          string `json:"label"`           // smtp | imap | pop3 — display only, stream is protocol-agnostic
 	Port           int    `json:"port"`            // container port >1024
 	Mode           string `json:"mode"`            // terminate | passthrough
-	DefaultBackend string `json:"default_backend"` // host:port, used when client sends no SNI
-	BackendPort    int    `json:"backend_port"`    // port mail domains forward to on this listener; 0 = domain backend carries its own port (legacy)
-	SNIRoute       bool   `json:"sni_route"`       // passthrough: route by SNI via ssl_preread
-	ProxySSL       bool   `json:"proxy_ssl"`       // terminate: re-encrypt to backend (backend on TLS port)
+	DefaultBackend string `json:"default_backend"` // host:port every mail domain on this listener goes to
+	ProxySSL      bool   `json:"proxy_ssl"`       // terminate: re-encrypt to backend (backend on TLS port)
 	Enabled        bool   `json:"enabled"`
 }
 
+// MailDomain: SNI name → certificate, served on every terminate listener.
+// Routing is per listener (DefaultBackend), not per domain.
 type MailDomain struct {
-	ID      int    `json:"id"`
-	Domain  string `json:"domain"`
-	Backend string `json:"backend"` // host:port
-	CertID  int    `json:"cert_id"` // used by terminate listeners (SNI-selected)
+	ID     int    `json:"id"`
+	Domain string `json:"domain"`
+	CertID int    `json:"cert_id"`
 }
 
 type StreamRule struct {

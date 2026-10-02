@@ -251,13 +251,8 @@ func checkListener(s *store.State, l *store.MailListener) error {
 	if l.Mode != "terminate" && l.Mode != "passthrough" {
 		return fmt.Errorf("mode must be terminate or passthrough")
 	}
-	if l.DefaultBackend != "" {
-		if err := checkHostPort(l.DefaultBackend); err != nil {
-			return err
-		}
-	}
-	if sniRouted(l) && (l.BackendPort < 1 || l.BackendPort > 65535) {
-		return fmt.Errorf("backend port must be 1-65535 (port mail domains are forwarded to)")
+	if err := checkHostPort(l.DefaultBackend); err != nil {
+		return err
 	}
 	if l.Mode == "terminate" {
 		ok := false
@@ -856,13 +851,8 @@ func (a *API) listMailDomains(w http.ResponseWriter, _ *http.Request) {
 	jsonOut(w, 200, nonNil(a.St.S.MailDomains))
 }
 
-// sniRouted: listener forwards per mail domain (SNI map), so it needs BackendPort.
-func sniRouted(l *store.MailListener) bool {
-	return l.Mode == "terminate" || (l.Mode == "passthrough" && l.SNIRoute)
-}
-
-// checkMailDomain: backend is a bare host (port comes from each listener) or
-// legacy host:port; one entry per domain since every listener routes it.
+// checkMailDomain: a domain only selects the SNI cert, so it needs one; one
+// entry per name, since every listener's cert map carries it.
 func checkMailDomain(s *store.State, d *store.MailDomain) error {
 	if !domainRe.MatchString(d.Domain) {
 		return fmt.Errorf("invalid domain %q", d.Domain)
@@ -872,22 +862,8 @@ func checkMailDomain(s *store.State, d *store.MailDomain) error {
 			return fmt.Errorf("mail domain %q already exists", d.Domain)
 		}
 	}
-	if strings.Contains(d.Backend, ":") {
-		if err := checkHostPort(d.Backend); err != nil {
-			return err
-		}
-	} else {
-		if !domainRe.MatchString(d.Backend) {
-			return fmt.Errorf("invalid backend host %q", d.Backend)
-		}
-		for i := range s.MailListeners {
-			if l := &s.MailListeners[i]; sniRouted(l) && l.BackendPort == 0 {
-				return fmt.Errorf("listener %q (port %d) has no backend port; set it or use host:port", l.Label, l.Port)
-			}
-		}
-	}
-	if d.CertID != 0 && s.CertByID(d.CertID) == nil {
-		return fmt.Errorf("cert %d not found", d.CertID)
+	if s.CertByID(d.CertID) == nil {
+		return fmt.Errorf("certificate required (cert %d not found)", d.CertID)
 	}
 	return nil
 }

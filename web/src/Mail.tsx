@@ -9,8 +9,6 @@ const emptyListener: MailListener = {
   port: 2465,
   mode: 'terminate',
   default_backend: '',
-  backend_port: 465,
-  sni_route: false,
   proxy_ssl: false,
   enabled: true,
 }
@@ -20,7 +18,7 @@ const knownProtocols = ['smtp', 'imap', 'pop3']
 // [label, container port, backend port]: terminate + re-encrypt to the backend TLS ports
 const presets = [['smtp', 2465, 465], ['imap', 2993, 993], ['pop3', 2995, 995]] as const
 
-const emptyDomain: MailDomain = { id: 0, domain: '', backend: '', cert_id: 0 }
+const emptyDomain: MailDomain = { id: 0, domain: '', cert_id: 0 }
 
 export default function Mail() {
   const [listeners, setListeners] = useState<MailListener[]>([])
@@ -59,8 +57,10 @@ export default function Mail() {
 
   const addPresets = () =>
     run(async () => {
-      for (const [label, port, backend_port] of presets) {
-        await post('/api/v1/mail/listeners', { ...emptyListener, id: undefined, label, port, backend_port, mode: 'terminate', proxy_ssl: true })
+      const host = prompt('Mail server host (e.g. 10.0.0.5)')?.trim()
+      if (!host) return
+      for (const [label, port, backendPort] of presets) {
+        await post('/api/v1/mail/listeners', { ...emptyListener, id: undefined, label, port, default_backend: `${host}:${backendPort}`, mode: 'terminate', proxy_ssl: true })
       }
       await reload()
     })
@@ -88,7 +88,8 @@ export default function Mail() {
         IMAPS 993, POP3S 995) and forwards plaintext, so the backend is its plain port (IMAP 143,
         POP3 110, SMTP 25). Tick "re-encrypt" to instead forward TLS to the backend's TLS port
         (993/995/465). Plain/STARTTLS-only ports use passthrough: the backend holds the cert.
-        A domain is routed on every listener: its backend host + that listener's backend port.
+        Domains only pick the certificate by SNI and apply to every listener; each listener
+        forwards all of them to its own backend.
       </p>
       <Err msg={error} />
 
@@ -100,7 +101,6 @@ export default function Mail() {
         <thead>
           <tr>
             <th>Domain (SNI)</th>
-            <th>Backend</th>
             <th>Certificate</th>
             <th></th>
           </tr>
@@ -109,7 +109,6 @@ export default function Mail() {
           {domains.map((d) => (
             <tr key={d.id}>
               <td>{d.domain}</td>
-              <td>{d.backend}</td>
               <td>{certs.find((c) => c.id === d.cert_id)?.name || '—'}</td>
               <td>
                 <button onClick={() => setEditD({ ...d })}>Edit</button>{' '}
@@ -127,11 +126,8 @@ export default function Mail() {
           <Row label="Domain (as sent in SNI, e.g. mail.example.com)">
             <input value={editD.domain} onChange={(e) => setEditD({ ...editD, domain: e.target.value })} />
           </Row>
-          <Row label="Backend host (port comes from each listener)">
-            <input value={editD.backend} onChange={(e) => setEditD({ ...editD, backend: e.target.value })} placeholder="10.0.0.5" />
-          </Row>
           <CertPicker
-            label="Certificate (for terminate listeners — can be the same cert an HTTPS host uses)"
+            label="Certificate (served on every terminate listener — can be the same cert an HTTPS host uses)"
             value={editD.cert_id}
             certs={certs}
             defaultDomains={editD.domain ? [editD.domain] : []}
@@ -149,7 +145,7 @@ export default function Mail() {
       <div className="bar">
         <h3>Listeners</h3>
         <button onClick={() => setEditL({ ...emptyListener })}>+ Add listener</button>
-        <button onClick={addPresets} disabled={busy} title="Creates 2465→465, 2993→993, 2995→995 (terminate, re-encrypt). Add a domain with a certificate first.">
+        <button onClick={addPresets} disabled={busy} title="Creates 2465→host:465, 2993→host:993, 2995→host:995 (terminate, re-encrypt). Add a domain with a certificate first.">
           + SMTPS / IMAPS / POP3S
         </button>
       </div>
@@ -159,8 +155,7 @@ export default function Mail() {
             <th>Protocol</th>
             <th>Port</th>
             <th>Mode</th>
-            <th>Backend port</th>
-            <th>Default backend</th>
+            <th>Backend</th>
             <th>On</th>
             <th></th>
           </tr>
@@ -170,8 +165,7 @@ export default function Mail() {
             <tr key={l.id}>
               <td>{l.label}</td>
               <td>{l.port}</td>
-              <td>{l.mode}{l.mode === 'passthrough' && l.sni_route ? ' (SNI route)' : ''}</td>
-              <td>{l.backend_port || '—'}</td>
+              <td>{l.mode}{l.mode === 'terminate' && l.proxy_ssl ? ' (re-encrypt)' : ''}</td>
               <td>{l.default_backend || '—'}</td>
               <td>{l.enabled ? '✓' : '✗'}</td>
               <td>
@@ -212,10 +206,7 @@ export default function Mail() {
               <option value="passthrough">passthrough (raw TCP)</option>
             </select>
           </Row>
-          <Row label="Backend port (domains forward here, e.g. 465 / 993 / 995)">
-            <input type="number" value={editL.backend_port} onChange={(e) => setEditL({ ...editL, backend_port: +e.target.value })} />
-          </Row>
-          <Row label="Default backend (host:port — no-SNI clients / unmatched domains)">
+          <Row label="Backend (host:port — every mail domain on this listener goes here)">
             <input
               value={editL.default_backend}
               onChange={(e) => setEditL({ ...editL, default_backend: e.target.value })}
@@ -224,9 +215,6 @@ export default function Mail() {
           </Row>
           <div className="checks">
             <Check label="Enabled" checked={editL.enabled} onChange={(v) => setEditL({ ...editL, enabled: v })} />
-            {editL.mode === 'passthrough' && (
-              <Check label="Route by SNI (ssl_preread)" checked={editL.sni_route} onChange={(v) => setEditL({ ...editL, sni_route: v })} />
-            )}
             {editL.mode === 'terminate' && (
               <Check label="Re-encrypt to backend (proxy_ssl → backend TLS port e.g. 993)" checked={editL.proxy_ssl} onChange={(v) => setEditL({ ...editL, proxy_ssl: v })} />
             )}

@@ -7,25 +7,7 @@ import (
 	"github.com/morningstar-sudo/super-nginx/internal/store"
 )
 
-// terminate/SNI listeners emit variable proxy_pass, which needs a resolver for
-// hostname backends; a passthrough non-SNI listener (literal proxy_pass) must not.
-func TestStreamResolver(t *testing.T) {
-	terminate := &store.State{
-		Certs:       []store.Cert{{ID: 1, Name: "c", Type: "custom"}},
-		MailDomains: []store.MailDomain{{ID: 2, Domain: "mail.example.com", Backend: "mailhost:465", CertID: 1}},
-		MailListeners: []store.MailListener{
-			{ID: 3, Port: 2465, Mode: "terminate", Enabled: true},
-		},
-	}
-	got := string(renderStream(terminate))
-	if !strings.Contains(got, "resolver 127.0.0.11") {
-		t.Fatalf("terminate listener should emit resolver, got:\n%s", got)
-	}
-	// empty default backend must render as valid quoted map default, not `default ;`
-	if !strings.Contains(got, `default "";`) {
-		t.Fatalf("empty default backend should render `default \"\";`, got:\n%s", got)
-	}
-
+func TestProxyHostRender(t *testing.T) {
 	// proxy host with cache on emits http-level path + location directives
 	cached := &store.State{
 		Hosts: []store.Host{
@@ -53,15 +35,6 @@ func TestStreamResolver(t *testing.T) {
 	}
 	if !strings.Contains(string(renderHTTP(withDir)), "client_max_body_size 100m;") {
 		t.Fatal("directive not rendered")
-	}
-
-	plain := &store.State{
-		MailListeners: []store.MailListener{
-			{ID: 1, Port: 2525, Mode: "passthrough", DefaultBackend: "10.0.0.5:25", Enabled: true},
-		},
-	}
-	if got := string(renderStream(plain)); strings.Contains(got, "resolver") {
-		t.Fatalf("passthrough non-SNI uses literal proxy_pass, no resolver needed, got:\n%s", got)
 	}
 }
 
@@ -146,35 +119,34 @@ func TestDefaultServer(t *testing.T) {
 	}
 }
 
-// One mail domain is routed on every listener, each to the domain host on that
-// listener's backend port; a legacy listener (no port) keeps domain host:port.
-func TestMailDomainPerListenerPort(t *testing.T) {
+// Every mail domain rides every listener: its cert lands in each terminate
+// listener's SNI map once, and traffic goes to the listener's backend
+// (literal proxy_pass, so no resolver).
+func TestMailListenerRender(t *testing.T) {
 	s := &store.State{
-		Certs:       []store.Cert{{ID: 1, Name: "c", Type: "custom"}},
-		MailDomains: []store.MailDomain{{ID: 2, Domain: "webmail.example.com", Backend: "mail", CertID: 1}},
+		Certs: []store.Cert{{ID: 1, Name: "c", Type: "custom"}},
+		MailDomains: []store.MailDomain{
+			{ID: 2, Domain: "webmail.example.com", CertID: 1},
+			{ID: 3, Domain: "mail.other.vn", CertID: 1},
+		},
 		MailListeners: []store.MailListener{
-			{ID: 3, Label: "smtp", Port: 2465, Mode: "terminate", BackendPort: 465, ProxySSL: true, Enabled: true},
-			{ID: 4, Label: "imap", Port: 2993, Mode: "terminate", BackendPort: 993, ProxySSL: true, Enabled: true},
-			{ID: 5, Label: "pop3", Port: 2995, Mode: "passthrough", SNIRoute: true, BackendPort: 995, Enabled: true},
+			{ID: 4, Label: "imap", Port: 2993, Mode: "terminate", DefaultBackend: "10.0.0.5:143", Enabled: true},
+			{ID: 5, Label: "pop3", Port: 2995, Mode: "terminate", DefaultBackend: "10.0.0.5:110", Enabled: true},
+			{ID: 6, Label: "smtp", Port: 2525, Mode: "passthrough", DefaultBackend: "10.0.0.5:25", Enabled: true},
+			{ID: 7, Label: "old", Port: 2000, Mode: "passthrough", Enabled: true}, // legacy: no backend → skipped
 		},
 	}
 	got := string(renderStream(s))
-	for _, want := range []string{"webmail.example.com mail:465;", "webmail.example.com mail:993;", "webmail.example.com mail:995;"} {
-		if n := strings.Count(got, want); n != 1 {
-			t.Fatalf("want %q once, got %d:\n%s", want, n, got)
+	for _, want := range []string{"proxy_pass 10.0.0.5:143;", "proxy_pass 10.0.0.5:110;", "proxy_pass 10.0.0.5:25;"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q:\n%s", want, got)
 		}
 	}
-
-	legacy := &store.State{
-		MailDomains:   []store.MailDomain{{ID: 2, Domain: "webmail.example.com", Backend: "mail:465"}},
-		MailListeners: []store.MailListener{{ID: 3, Port: 2465, Mode: "passthrough", SNIRoute: true, Enabled: true}},
+	// crt + key map on each of the 2 terminate listeners
+	if n := strings.Count(got, "webmail.example.com "); n != 4 {
+		t.Fatalf("want domain in 4 cert maps, got %d:\n%s", n, got)
 	}
-	if got := string(renderStream(legacy)); !strings.Contains(got, "webmail.example.com mail:465;") {
-		t.Fatalf("legacy host:port backend changed:\n%s", got)
-	}
-	// listener port overrides a legacy domain port
-	legacy.MailListeners[0].BackendPort = 995
-	if got := string(renderStream(legacy)); !strings.Contains(got, "webmail.example.com mail:995;") {
-		t.Fatalf("listener backend port not applied to host:port domain:\n%s", got)
+	if strings.Contains(got, "resolver") || strings.Contains(got, "listen 2000") {
+		t.Fatalf("unexpected resolver or legacy listener:\n%s", got)
 	}
 }
