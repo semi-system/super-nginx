@@ -256,6 +256,9 @@ func checkListener(s *store.State, l *store.MailListener) error {
 			return err
 		}
 	}
+	if sniRouted(l) && (l.BackendPort < 1 || l.BackendPort > 65535) {
+		return fmt.Errorf("backend port must be 1-65535 (port mail domains are forwarded to)")
+	}
 	if l.Mode == "terminate" {
 		ok := false
 		for _, d := range s.MailDomains {
@@ -853,12 +856,35 @@ func (a *API) listMailDomains(w http.ResponseWriter, _ *http.Request) {
 	jsonOut(w, 200, nonNil(a.St.S.MailDomains))
 }
 
+// sniRouted: listener forwards per mail domain (SNI map), so it needs BackendPort.
+func sniRouted(l *store.MailListener) bool {
+	return l.Mode == "terminate" || (l.Mode == "passthrough" && l.SNIRoute)
+}
+
+// checkMailDomain: backend is a bare host (port comes from each listener) or
+// legacy host:port; one entry per domain since every listener routes it.
 func checkMailDomain(s *store.State, d *store.MailDomain) error {
 	if !domainRe.MatchString(d.Domain) {
 		return fmt.Errorf("invalid domain %q", d.Domain)
 	}
-	if err := checkHostPort(d.Backend); err != nil {
-		return err
+	for _, o := range s.MailDomains {
+		if o.ID != d.ID && strings.EqualFold(o.Domain, d.Domain) {
+			return fmt.Errorf("mail domain %q already exists", d.Domain)
+		}
+	}
+	if strings.Contains(d.Backend, ":") {
+		if err := checkHostPort(d.Backend); err != nil {
+			return err
+		}
+	} else {
+		if !domainRe.MatchString(d.Backend) {
+			return fmt.Errorf("invalid backend host %q", d.Backend)
+		}
+		for i := range s.MailListeners {
+			if l := &s.MailListeners[i]; sniRouted(l) && l.BackendPort == 0 {
+				return fmt.Errorf("listener %q (port %d) has no backend port; set it or use host:port", l.Label, l.Port)
+			}
+		}
 	}
 	if d.CertID != 0 && s.CertByID(d.CertID) == nil {
 		return fmt.Errorf("cert %d not found", d.CertID)
@@ -872,6 +898,7 @@ func (a *API) createMailDomain(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad request: %s", err)
 		return
 	}
+	d.ID = 0 // a client-sent id must not dodge the duplicate check
 	a.mutate(w, r, func(s *store.State) error {
 		if err := checkMailDomain(s, &d); err != nil {
 			return err
@@ -896,10 +923,10 @@ func (a *API) updateMailDomain(w http.ResponseWriter, r *http.Request) {
 	a.mutate(w, r, func(s *store.State) error {
 		for i := range s.MailDomains {
 			if s.MailDomains[i].ID == id {
+				d.ID = id // before check, so the entry isn't its own duplicate
 				if err := checkMailDomain(s, &d); err != nil {
 					return err
 				}
-				d.ID = id
 				s.MailDomains[i] = d
 				return nil
 			}

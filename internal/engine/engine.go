@@ -7,9 +7,11 @@ package engine
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/morningstar-sudo/super-nginx/internal/stats"
@@ -378,7 +380,7 @@ func renderStream(s *store.State) []byte {
 			// no-SNI/unmatched clients get proxy_pass "" and the conn is dropped)
 			fmt.Fprintf(b, "    map $ssl_server_name %s {\n        default %q;\n", up, l.DefaultBackend)
 			for _, d := range domains {
-				fmt.Fprintf(b, "        %s %s;\n", d.Domain, d.Backend)
+				fmt.Fprintf(b, "        %s %s;\n", d.Domain, domainBackend(d, l))
 			}
 			fmt.Fprint(b, "    }\n")
 			proxySSL := ""
@@ -392,7 +394,7 @@ func renderStream(s *store.State) []byte {
 			if l.SNIRoute {
 				fmt.Fprintf(b, "    map $ssl_preread_server_name %s {\n        default %q;\n", up, l.DefaultBackend)
 				for _, d := range domains {
-					fmt.Fprintf(b, "        %s %s;\n", d.Domain, d.Backend)
+					fmt.Fprintf(b, "        %s %s;\n", d.Domain, domainBackend(d, l))
 				}
 				fmt.Fprint(b, "    }\n")
 				fmt.Fprintf(b, "    server {\n        listen %d;\n        ssl_preread on;\n        proxy_pass %s;\n    }\n", l.Port, up)
@@ -426,6 +428,20 @@ func streamNeedsResolver(s *store.State) bool {
 		}
 	}
 	return false
+}
+
+// domainBackend: the domain's host on this listener's backend port, so one
+// domain routes to smtps/imaps/pop3s alike. Listener without a port (legacy)
+// uses the domain backend as stored (host:port).
+func domainBackend(d store.MailDomain, l store.MailListener) string {
+	if l.BackendPort == 0 {
+		return d.Backend
+	}
+	host := d.Backend
+	if h, _, err := net.SplitHostPort(d.Backend); err == nil {
+		host = h
+	}
+	return net.JoinHostPort(host, strconv.Itoa(l.BackendPort))
 }
 
 func domainCert(s *store.State, d store.MailDomain) (fullchain, privkey string, ok bool) {

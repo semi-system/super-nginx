@@ -145,3 +145,36 @@ func TestDefaultServer(t *testing.T) {
 		t.Fatalf("want exactly one default_server per port, got %d:\n%s", n, withHost)
 	}
 }
+
+// One mail domain is routed on every listener, each to the domain host on that
+// listener's backend port; a legacy listener (no port) keeps domain host:port.
+func TestMailDomainPerListenerPort(t *testing.T) {
+	s := &store.State{
+		Certs:       []store.Cert{{ID: 1, Name: "c", Type: "custom"}},
+		MailDomains: []store.MailDomain{{ID: 2, Domain: "webmail.example.com", Backend: "mail", CertID: 1}},
+		MailListeners: []store.MailListener{
+			{ID: 3, Label: "smtp", Port: 2465, Mode: "terminate", BackendPort: 465, ProxySSL: true, Enabled: true},
+			{ID: 4, Label: "imap", Port: 2993, Mode: "terminate", BackendPort: 993, ProxySSL: true, Enabled: true},
+			{ID: 5, Label: "pop3", Port: 2995, Mode: "passthrough", SNIRoute: true, BackendPort: 995, Enabled: true},
+		},
+	}
+	got := string(renderStream(s))
+	for _, want := range []string{"webmail.example.com mail:465;", "webmail.example.com mail:993;", "webmail.example.com mail:995;"} {
+		if n := strings.Count(got, want); n != 1 {
+			t.Fatalf("want %q once, got %d:\n%s", want, n, got)
+		}
+	}
+
+	legacy := &store.State{
+		MailDomains:   []store.MailDomain{{ID: 2, Domain: "webmail.example.com", Backend: "mail:465"}},
+		MailListeners: []store.MailListener{{ID: 3, Port: 2465, Mode: "passthrough", SNIRoute: true, Enabled: true}},
+	}
+	if got := string(renderStream(legacy)); !strings.Contains(got, "webmail.example.com mail:465;") {
+		t.Fatalf("legacy host:port backend changed:\n%s", got)
+	}
+	// listener port overrides a legacy domain port
+	legacy.MailListeners[0].BackendPort = 995
+	if got := string(renderStream(legacy)); !strings.Contains(got, "webmail.example.com mail:995;") {
+		t.Fatalf("listener backend port not applied to host:port domain:\n%s", got)
+	}
+}
