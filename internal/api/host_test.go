@@ -57,6 +57,32 @@ func TestCheckLoadBalancerHost(t *testing.T) {
 	}
 }
 
+func TestCheckLoadBalancerBackendTLSVerification(t *testing.T) {
+	h := validLoadBalancerHost()
+	h.UpstreamScheme = "https"
+	h.VerifyBackendTLS = true
+	if err := checkHost(&store.State{}, &h); err != nil {
+		t.Fatalf("valid backend TLS verification rejected: %v", err)
+	}
+	if h.BackendTLSServerName != "lb.example.com" {
+		t.Fatalf("unexpected default backend TLS server name %q", h.BackendTLSServerName)
+	}
+
+	h = validLoadBalancerHost()
+	h.VerifyBackendTLS = true
+	if err := checkHost(&store.State{}, &h); err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("TLS verification over HTTP should be rejected, got %v", err)
+	}
+
+	h = validLoadBalancerHost()
+	h.UpstreamScheme = "https"
+	h.VerifyBackendTLS = true
+	h.BackendTLSServerName = "*.example.com"
+	if err := checkHost(&store.State{}, &h); err == nil || !strings.Contains(err.Error(), "server name") {
+		t.Fatalf("wildcard TLS server name should be rejected, got %v", err)
+	}
+}
+
 func TestCheckLoadBalancerHostRejectsInvalidBackends(t *testing.T) {
 	tests := []struct {
 		name string

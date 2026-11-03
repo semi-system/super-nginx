@@ -265,6 +265,21 @@ func checkHost(s *store.State, h *store.Host) error {
 		if h.UpstreamScheme != "http" && h.UpstreamScheme != "https" {
 			return fmt.Errorf("load balancer upstream scheme must be http or https")
 		}
+		if h.VerifyBackendTLS {
+			if h.UpstreamScheme != "https" {
+				return fmt.Errorf("backend TLS verification requires the https upstream protocol")
+			}
+			h.BackendTLSServerName = strings.ToLower(strings.TrimSpace(h.BackendTLSServerName))
+			if h.BackendTLSServerName == "" && len(h.Domains) > 0 {
+				h.BackendTLSServerName = strings.TrimPrefix(strings.ToLower(h.Domains[0]), "*.")
+			}
+			if net.ParseIP(h.BackendTLSServerName) == nil &&
+				(!domainRe.MatchString(h.BackendTLSServerName) || strings.Contains(h.BackendTLSServerName, "*")) {
+				return fmt.Errorf("backend TLS server name must be a valid hostname or IP address")
+			}
+		} else {
+			h.BackendTLSServerName = ""
+		}
 		if h.LoadBalance == "" {
 			h.LoadBalance = "round_robin"
 		}
@@ -342,6 +357,8 @@ func checkHost(s *store.State, h *store.Host) error {
 		h.HealthCheck = false
 		h.HealthCheckPath = ""
 		h.HealthCheckTimeout = 0
+		h.VerifyBackendTLS = false
+		h.BackendTLSServerName = ""
 	}
 	if h.IsolateCerts {
 		normalized := make(map[string]int, len(h.Domains))
@@ -793,8 +810,9 @@ type backendHealth struct {
 
 // probeBackend performs the same HTTP request shape that nginx proxies: the
 // public host name is sent in Host while the connection goes to the backend.
-// TLS verification is disabled to match nginx proxy_ssl_verify's default; the
-// configured backend address is still the only possible destination.
+// HTTPS probes verify both the certificate chain and the backend hostname and
+// refuse legacy TLS versions. This intentionally applies stricter transport
+// security than nginx's proxy_ssl_verify default.
 func probeBackend(h store.Host, upstream store.Upstream) backendHealth {
 	result := backendHealth{Address: upstream.Address, CheckedAt: time.Now().UTC()}
 	timeout := time.Duration(h.HealthCheckTimeout) * time.Second
@@ -810,7 +828,10 @@ func probeBackend(h store.Host, upstream store.Upstream) backendHealth {
 		Proxy:             nil,
 		DialContext:       (&net.Dialer{Timeout: timeout}).DialContext,
 		DisableKeepAlives: true,
-		TLSClientConfig:   &tls.Config{InsecureSkipVerify: true}, //nolint:gosec -- mirrors nginx upstream TLS defaults
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			ServerName: h.BackendTLSServerName,
+		},
 	}
 	client := &http.Client{
 		Timeout:   timeout,

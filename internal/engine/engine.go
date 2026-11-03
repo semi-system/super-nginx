@@ -378,6 +378,14 @@ func writeContent(b *bytes.Buffer, s *store.State, h store.Host) {
 		fmt.Fprint(b, access)
 		if h.Type == "load_balancer" {
 			fmt.Fprintf(b, "        proxy_pass %s://%s;\n", h.UpstreamScheme, upstreamName(h.ID))
+			if h.VerifyBackendTLS {
+				fmt.Fprint(b, "        proxy_ssl_verify on;\n")
+				fmt.Fprint(b, "        proxy_ssl_server_name on;\n")
+				fmt.Fprintf(b, "        proxy_ssl_name %s;\n", h.BackendTLSServerName)
+				fmt.Fprint(b, "        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;\n")
+				fmt.Fprint(b, "        proxy_ssl_verify_depth 5;\n")
+				fmt.Fprint(b, "        proxy_ssl_protocols TLSv1.2 TLSv1.3;\n")
+			}
 		} else {
 			fmt.Fprintf(b, "        proxy_pass %s;\n", h.Target)
 		}

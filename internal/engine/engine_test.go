@@ -42,6 +42,7 @@ func TestLoadBalancerHostRender(t *testing.T) {
 	s := &store.State{Hosts: []store.Host{{
 		ID: 12, Type: "load_balancer", Domains: []string{"lb.example.com"},
 		UpstreamScheme: "https", LoadBalance: "least_conn", Cache: true, CacheTime: "1m", Enabled: true,
+		VerifyBackendTLS: true, BackendTLSServerName: "backend.example.com",
 		Upstreams: []store.Upstream{
 			{Address: "app-1:3000", Weight: 3, MaxFails: 2, FailTimeout: "15s"},
 			{Address: "app-2:3000", Weight: 1, MaxFails: 1, FailTimeout: "10s", Backup: true},
@@ -54,6 +55,11 @@ func TestLoadBalancerHostRender(t *testing.T) {
 		"server app-1:3000 weight=3 max_fails=2 fail_timeout=15s;",
 		"server app-2:3000 weight=1 max_fails=1 fail_timeout=10s backup;",
 		"proxy_pass https://sn_lb_12;",
+		"proxy_ssl_verify on;",
+		"proxy_ssl_server_name on;",
+		"proxy_ssl_name backend.example.com;",
+		"proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;",
+		"proxy_ssl_protocols TLSv1.2 TLSv1.3;",
 		"proxy_cache sn_cache_12;",
 	} {
 		if !strings.Contains(got, want) {

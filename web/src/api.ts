@@ -26,6 +26,8 @@ export type Host = {
   health_check: boolean
   health_check_path: string
   health_check_timeout: number
+  verify_backend_tls: boolean
+  backend_tls_server_name: string
   cert_id: number
   isolate_certs: boolean
   domain_certs: Record<string, number>

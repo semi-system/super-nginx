@@ -50,6 +50,8 @@ const empty: Host = {
   health_check: true,
   health_check_path: '/',
   health_check_timeout: 3,
+  verify_backend_tls: false,
+  backend_tls_server_name: '',
   cert_id: 0,
   isolate_certs: true,
   domain_certs: {},
@@ -154,6 +156,8 @@ export default function Hosts() {
       health_check: host.health_check ?? false,
       health_check_path: host.health_check_path || '/',
       health_check_timeout: host.health_check_timeout || 3,
+      verify_backend_tls: host.verify_backend_tls ?? false,
+      backend_tls_server_name: host.backend_tls_server_name || '',
     })
 
   return (
@@ -276,12 +280,52 @@ export default function Hosts() {
               <Row label="Upstream protocol">
                 <select
                   value={edit.upstream_scheme}
-                  onChange={(e) => setEdit({ ...edit, upstream_scheme: e.target.value as Host['upstream_scheme'] })}
+                  onChange={(e) => {
+                    const upstream_scheme = e.target.value as Host['upstream_scheme']
+                    setEdit({
+                      ...edit,
+                      upstream_scheme,
+                      verify_backend_tls: upstream_scheme === 'https' ? edit.verify_backend_tls : false,
+                      backend_tls_server_name: upstream_scheme === 'https' ? edit.backend_tls_server_name : '',
+                    })
+                  }}
                 >
                   <option value="http">HTTP</option>
                   <option value="https">HTTPS</option>
                 </select>
               </Row>
+              {edit.upstream_scheme === 'https' && (
+                <>
+                  <div className="checks">
+                    <Check
+                      label="Verify backend TLS certificate"
+                      checked={edit.verify_backend_tls}
+                      onChange={(verify_backend_tls) =>
+                        setEdit({
+                          ...edit,
+                          verify_backend_tls,
+                          backend_tls_server_name: verify_backend_tls
+                            ? edit.backend_tls_server_name || edit.domains[0]?.replace(/^\*\./, '') || ''
+                            : '',
+                        })
+                      }
+                    />
+                  </div>
+                  {edit.verify_backend_tls && (
+                    <Row label="Backend TLS server name">
+                      <input
+                        required
+                        placeholder="backend.example.com"
+                        value={edit.backend_tls_server_name}
+                        onChange={(e) => setEdit({ ...edit, backend_tls_server_name: e.target.value.trim() })}
+                      />
+                      <p className="hint">
+                        Every backend certificate must be valid for this name and chain to a CA in the system trust store.
+                      </p>
+                    </Row>
+                  )}
+                </>
+              )}
               <Row label="Load balancing method">
                 <select
                   value={edit.load_balance}

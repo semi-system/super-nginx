@@ -11,6 +11,7 @@ Xem [PLAN.md](PLAN.md) — kiến trúc + lộ trình. Trạng thái: **Phase 1�
 - Hosts: proxy / load balancer / redirect / static, HTTP/2, HSTS, websocket, force-SSL,
   load balancing round-robin / least-connections / IP hash, backend weight + passive failover
   và HTTP health probe chủ động (path/timeout, tự refresh trạng thái mỗi 30 giây),
+  tùy chọn xác minh CA/hostname của HTTPS backend,
   custom nginx snippet (server + location), WAF ModSecurity+CRS **per-host**
 - Pipeline an toàn: mọi thay đổi → render → `nginx -t` → reload; config hỏng
   bị từ chối kèm nguyên văn lỗi, tự rollback

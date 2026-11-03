@@ -22,31 +22,33 @@ type User struct {
 }
 
 type Host struct {
-	ID                 int             `json:"id"`
-	Type               string          `json:"type"` // proxy | load_balancer | redirect | static
-	Domains            []string        `json:"domains"`
-	Target             string          `json:"target"`                    // proxy: http://host:port, redirect: URL prefix, static: dir under /data/www
-	UpstreamScheme     string          `json:"upstream_scheme,omitempty"` // load_balancer: http | https
-	LoadBalance        string          `json:"load_balance,omitempty"`    // round_robin | least_conn | ip_hash
-	Upstreams          []Upstream      `json:"upstreams,omitempty"`
-	HealthCheck        bool            `json:"health_check"`                   // load_balancer: actively probe backends
-	HealthCheckPath    string          `json:"health_check_path,omitempty"`    // HTTP path; default /
-	HealthCheckTimeout int             `json:"health_check_timeout,omitempty"` // seconds; default 3
-	CertID             int             `json:"cert_id"`
-	IsolateCerts       bool            `json:"isolate_certs,omitempty"`
-	DomainCerts        map[string]int  `json:"domain_certs,omitempty"` // isolated TLS: domain -> single-domain cert id
-	ForceSSL           bool            `json:"force_ssl"`
-	HTTP2              bool            `json:"http2"`
-	HSTS               bool            `json:"hsts"`
-	Websocket          bool            `json:"websocket"`
-	WAF                bool            `json:"waf"`
-	AccessListID       int             `json:"access_list_id"`
-	Cache              bool            `json:"cache"`      // proxy: enable proxy_cache
-	CacheTime          string          `json:"cache_time"` // nginx time for 200/302 (e.g. 10m); default 10m
-	Directives         []HostDirective `json:"directives"` // extra server-context directives (client_max_body_size, ...)
-	ServerSnippet      string          `json:"server_snippet"`
-	LocationSnippet    string          `json:"location_snippet"`
-	Enabled            bool            `json:"enabled"`
+	ID                   int             `json:"id"`
+	Type                 string          `json:"type"` // proxy | load_balancer | redirect | static
+	Domains              []string        `json:"domains"`
+	Target               string          `json:"target"`                    // proxy: http://host:port, redirect: URL prefix, static: dir under /data/www
+	UpstreamScheme       string          `json:"upstream_scheme,omitempty"` // load_balancer: http | https
+	LoadBalance          string          `json:"load_balance,omitempty"`    // round_robin | least_conn | ip_hash
+	Upstreams            []Upstream      `json:"upstreams,omitempty"`
+	HealthCheck          bool            `json:"health_check"`                   // load_balancer: actively probe backends
+	HealthCheckPath      string          `json:"health_check_path,omitempty"`    // HTTP path; default /
+	HealthCheckTimeout   int             `json:"health_check_timeout,omitempty"` // seconds; default 3
+	VerifyBackendTLS     bool            `json:"verify_backend_tls"`             // load_balancer HTTPS: verify CA + name
+	BackendTLSServerName string          `json:"backend_tls_server_name,omitempty"`
+	CertID               int             `json:"cert_id"`
+	IsolateCerts         bool            `json:"isolate_certs,omitempty"`
+	DomainCerts          map[string]int  `json:"domain_certs,omitempty"` // isolated TLS: domain -> single-domain cert id
+	ForceSSL             bool            `json:"force_ssl"`
+	HTTP2                bool            `json:"http2"`
+	HSTS                 bool            `json:"hsts"`
+	Websocket            bool            `json:"websocket"`
+	WAF                  bool            `json:"waf"`
+	AccessListID         int             `json:"access_list_id"`
+	Cache                bool            `json:"cache"`      // proxy: enable proxy_cache
+	CacheTime            string          `json:"cache_time"` // nginx time for 200/302 (e.g. 10m); default 10m
+	Directives           []HostDirective `json:"directives"` // extra server-context directives (client_max_body_size, ...)
+	ServerSnippet        string          `json:"server_snippet"`
+	LocationSnippet      string          `json:"location_snippet"`
+	Enabled              bool            `json:"enabled"`
 }
 
 // Upstream is one backend in a load-balancer host. MaxFails and FailTimeout
