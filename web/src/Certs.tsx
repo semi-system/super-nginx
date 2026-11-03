@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { get, post, del, Cert } from './api'
-import { Err, Row, Modal, useAsync } from './ui'
+import { Err, Row, Modal, Pagination, useAsync, usePaged } from './ui'
 import { dnsProviders } from './dnsProviders'
 
 export default function Certs() {
   const [certs, setCerts] = useState<Cert[]>([])
   const [mode, setMode] = useState<'none' | 'custom' | 'acme'>('none')
   const { error, busy, run, setError } = useAsync()
+  const paged = usePaged(certs)
 
   // custom form
   const [name, setName] = useState('')
@@ -88,7 +89,7 @@ export default function Certs() {
           </tr>
         </thead>
         <tbody>
-          {certs.map((c) => (
+          {paged.rows.map((c) => (
             <tr key={c.id}>
               <td>{c.name}</td>
               <td>{c.type === 'acme' ? `acme/${c.challenge}` : 'custom'}</td>
@@ -110,6 +111,7 @@ export default function Certs() {
           ))}
         </tbody>
       </table>
+      <Pagination {...paged} />
 
       {mode === 'custom' && (
         <Modal onClose={() => setMode('none')}>

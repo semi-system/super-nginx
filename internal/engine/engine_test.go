@@ -38,6 +38,30 @@ func TestProxyHostRender(t *testing.T) {
 	}
 }
 
+func TestLoadBalancerHostRender(t *testing.T) {
+	s := &store.State{Hosts: []store.Host{{
+		ID: 12, Type: "load_balancer", Domains: []string{"lb.example.com"},
+		UpstreamScheme: "https", LoadBalance: "least_conn", Cache: true, CacheTime: "1m", Enabled: true,
+		Upstreams: []store.Upstream{
+			{Address: "app-1:3000", Weight: 3, MaxFails: 2, FailTimeout: "15s"},
+			{Address: "app-2:3000", Weight: 1, MaxFails: 1, FailTimeout: "10s", Backup: true},
+		},
+	}}}
+	got := string(renderHTTP(s))
+	for _, want := range []string{
+		"upstream sn_lb_12 {",
+		"least_conn;",
+		"server app-1:3000 weight=3 max_fails=2 fail_timeout=15s;",
+		"server app-2:3000 weight=1 max_fails=1 fail_timeout=10s backup;",
+		"proxy_pass https://sn_lb_12;",
+		"proxy_cache sn_cache_12;",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("load balancer config missing %q, got:\n%s", want, got)
+		}
+	}
+}
+
 // Every user-facing server block must feed the stats collector, including the
 // force_ssl redirect block (which skips writeServerCommon) and the https block.
 // The internal stub_status server must stay out of the counts.
@@ -81,9 +105,9 @@ func TestDefaultServer(t *testing.T) {
 		set  store.Settings
 		want string
 	}{
-		{store.Settings{}, "return 444;"},                       // zero value == close
-		{store.Settings{DefaultAction: "close"}, "return 444;"}, //
-		{store.Settings{DefaultAction: "404"}, `return 404 "404 Not Found";`},   //
+		{store.Settings{}, "return 444;"},                                     // zero value == close
+		{store.Settings{DefaultAction: "close"}, "return 444;"},               //
+		{store.Settings{DefaultAction: "404"}, `return 404 "404 Not Found";`}, //
 		{store.Settings{DefaultAction: "redirect", DefaultTarget: "https://example.com"}, //
 			"return 301 https://example.com$request_uri;"},
 		{store.Settings{DefaultAction: "html", DefaultHTML: "<h1>x</h1>"}, "root " + defaultDir + ";"},

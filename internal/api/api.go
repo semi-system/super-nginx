@@ -196,6 +196,56 @@ func checkHost(s *store.State, h *store.Host) error {
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return fmt.Errorf("proxy target must be http(s)://host[:port]")
 		}
+	case "load_balancer":
+		if h.UpstreamScheme == "" {
+			h.UpstreamScheme = "http"
+		}
+		if h.UpstreamScheme != "http" && h.UpstreamScheme != "https" {
+			return fmt.Errorf("load balancer upstream scheme must be http or https")
+		}
+		if h.LoadBalance == "" {
+			h.LoadBalance = "round_robin"
+		}
+		if h.LoadBalance != "round_robin" && h.LoadBalance != "least_conn" && h.LoadBalance != "ip_hash" {
+			return fmt.Errorf("load balance method must be round_robin, least_conn or ip_hash")
+		}
+		if len(h.Upstreams) < 2 {
+			return fmt.Errorf("load balancer requires at least two backends")
+		}
+		seen := make(map[string]bool, len(h.Upstreams))
+		primaries := 0
+		for i := range h.Upstreams {
+			u := &h.Upstreams[i]
+			if err := checkHostPort(u.Address); err != nil {
+				return fmt.Errorf("backend %d: %w", i+1, err)
+			}
+			key := strings.ToLower(u.Address)
+			if seen[key] {
+				return fmt.Errorf("backend %q is duplicated", u.Address)
+			}
+			seen[key] = true
+			if u.Weight < 0 || u.Weight > 1000 {
+				return fmt.Errorf("backend %q weight must be 0-1000", u.Address)
+			}
+			if u.MaxFails < 0 || u.MaxFails > 1000 {
+				return fmt.Errorf("backend %q max_fails must be 0-1000", u.Address)
+			}
+			if u.FailTimeout == "" {
+				u.FailTimeout = "10s"
+			}
+			if !nginxTime.MatchString(u.FailTimeout) {
+				return fmt.Errorf("backend %q fail_timeout must be an nginx time (e.g. 10s, 1m)", u.Address)
+			}
+			if u.Backup && h.LoadBalance == "ip_hash" {
+				return fmt.Errorf("backup backends cannot be used with ip_hash")
+			}
+			if !u.Backup {
+				primaries++
+			}
+		}
+		if primaries == 0 {
+			return fmt.Errorf("load balancer requires at least one primary backend")
+		}
 	case "redirect":
 		u, err := url.Parse(h.Target)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -206,7 +256,7 @@ func checkHost(s *store.State, h *store.Host) error {
 			return fmt.Errorf("static target must be a directory name under /data/www")
 		}
 	default:
-		return fmt.Errorf("type must be proxy, redirect or static")
+		return fmt.Errorf("type must be proxy, load_balancer, redirect or static")
 	}
 	if h.CertID != 0 && s.CertByID(h.CertID) == nil {
 		return fmt.Errorf("cert %d not found", h.CertID)
@@ -534,6 +584,9 @@ func (a *API) listHosts(w http.ResponseWriter, _ *http.Request) {
 	for i := range hosts {
 		if hosts[i].Directives == nil {
 			hosts[i].Directives = []store.HostDirective{}
+		}
+		if hosts[i].Upstreams == nil {
+			hosts[i].Upstreams = []store.Upstream{}
 		}
 	}
 	jsonOut(w, 200, nonNil(hosts))

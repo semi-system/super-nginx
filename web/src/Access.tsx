@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { get, post, put, del } from './api'
-import { Err, Row, Modal, useAsync } from './ui'
+import { Err, Row, Modal, Pagination, useAsync, usePaged } from './ui'
 
 type ListOut = {
   id: number
@@ -26,6 +26,7 @@ export default function Access() {
   const [lists, setLists] = useState<ListOut[]>([])
   const [edit, setEdit] = useState<EditState | null>(null)
   const { error, busy, run } = useAsync()
+  const paged = usePaged(lists)
 
   const reload = async () => setLists((await get('/api/v1/accesslists')) ?? [])
   useEffect(() => {
@@ -84,7 +85,7 @@ export default function Access() {
           </tr>
         </thead>
         <tbody>
-          {lists.map((l) => (
+          {paged.rows.map((l) => (
             <tr key={l.id}>
               <td>{l.name}</td>
               <td>{(l.users || []).join(', ') || '—'}</td>
@@ -98,6 +99,7 @@ export default function Access() {
           ))}
         </tbody>
       </table>
+      <Pagination {...paged} />
 
       {edit && (
         <Modal onClose={() => setEdit(null)}>

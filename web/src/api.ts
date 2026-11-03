@@ -17,9 +17,12 @@ export const del = <T = any>(p: string) => api<T>(p, { method: 'DELETE' })
 
 export type Host = {
   id: number
-  type: 'proxy' | 'redirect' | 'static'
+  type: 'proxy' | 'load_balancer' | 'redirect' | 'static'
   domains: string[]
   target: string
+  upstream_scheme: 'http' | 'https'
+  load_balance: 'round_robin' | 'least_conn' | 'ip_hash'
+  upstreams: Upstream[]
   cert_id: number
   force_ssl: boolean
   http2: boolean
@@ -33,6 +36,14 @@ export type Host = {
   server_snippet: string
   location_snippet: string
   enabled: boolean
+}
+
+export type Upstream = {
+  address: string
+  weight: number
+  max_fails: number
+  fail_timeout: string
+  backup: boolean
 }
 
 export type Cert = {

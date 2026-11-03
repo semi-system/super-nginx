@@ -23,9 +23,12 @@ type User struct {
 
 type Host struct {
 	ID              int             `json:"id"`
-	Type            string          `json:"type"` // proxy | redirect | static
+	Type            string          `json:"type"` // proxy | load_balancer | redirect | static
 	Domains         []string        `json:"domains"`
-	Target          string          `json:"target"` // proxy: http://host:port, redirect: URL prefix, static: dir under /data/www
+	Target          string          `json:"target"`                    // proxy: http://host:port, redirect: URL prefix, static: dir under /data/www
+	UpstreamScheme  string          `json:"upstream_scheme,omitempty"` // load_balancer: http | https
+	LoadBalance     string          `json:"load_balance,omitempty"`    // round_robin | least_conn | ip_hash
+	Upstreams       []Upstream      `json:"upstreams,omitempty"`
 	CertID          int             `json:"cert_id"`
 	ForceSSL        bool            `json:"force_ssl"`
 	HTTP2           bool            `json:"http2"`
@@ -39,6 +42,17 @@ type Host struct {
 	ServerSnippet   string          `json:"server_snippet"`
 	LocationSnippet string          `json:"location_snippet"`
 	Enabled         bool            `json:"enabled"`
+}
+
+// Upstream is one backend in a load-balancer host. MaxFails and FailTimeout
+// use nginx's passive health checks; Backup only receives traffic when the
+// primary backends are unavailable.
+type Upstream struct {
+	Address     string `json:"address"` // host:port
+	Weight      int    `json:"weight"`
+	MaxFails    int    `json:"max_fails"`
+	FailTimeout string `json:"fail_timeout"`
+	Backup      bool   `json:"backup"`
 }
 
 // HostDirective is one nginx directive rendered in the server context,
@@ -66,7 +80,7 @@ type MailListener struct {
 	Port           int    `json:"port"`            // container port >1024
 	Mode           string `json:"mode"`            // terminate | passthrough
 	DefaultBackend string `json:"default_backend"` // host:port every mail domain on this listener goes to
-	ProxySSL      bool   `json:"proxy_ssl"`       // terminate: re-encrypt to backend (backend on TLS port)
+	ProxySSL       bool   `json:"proxy_ssl"`       // terminate: re-encrypt to backend (backend on TLS port)
 	Enabled        bool   `json:"enabled"`
 }
 

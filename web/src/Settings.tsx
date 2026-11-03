@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { get, post, put } from './api'
-import { Err, Row, Check, useAsync } from './ui'
+import { Err, Row, Check, Pagination, useAsync, usePaged } from './ui'
 
 export default function Settings({ onLogout }: { onLogout: () => void }) {
   const [email, setEmail] = useState('')
@@ -202,9 +202,15 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
 
 function AuditLog() {
   const [lines, setLines] = useState<string[]>([])
+  const paged = usePaged(lines, 20)
   useEffect(() => {
     get('/api/v1/audit').then(setLines).catch(() => {})
   }, [])
   if (!lines.length) return <p className="hint">No entries yet.</p>
-  return <pre>{lines.join('\n')}</pre>
+  return (
+    <>
+      <pre>{paged.rows.join('\n')}</pre>
+      <Pagination {...paged} />
+    </>
+  )
 }

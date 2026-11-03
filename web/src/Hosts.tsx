@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { get, post, put, del, Host, Cert } from './api'
-import { Err, Row, Check, Modal, useAsync } from './ui'
+import { Err, Row, Check, Modal, Pagination, useAsync, usePaged } from './ui'
 import CertPicker from './CertPicker'
 import DomainInput from './DomainInput'
 
@@ -32,6 +32,12 @@ const empty: Host = {
   type: 'proxy',
   domains: [],
   target: '',
+  upstream_scheme: 'http',
+  load_balance: 'round_robin',
+  upstreams: [
+    { address: '', weight: 1, max_fails: 1, fail_timeout: '10s', backup: false },
+    { address: '', weight: 1, max_fails: 1, fail_timeout: '10s', backup: false },
+  ],
   cert_id: 0,
   force_ssl: false,
   http2: true,
@@ -53,6 +59,7 @@ export default function Hosts() {
   const [acls, setAcls] = useState<AccessListOut[]>([])
   const [edit, setEdit] = useState<Host | null>(null)
   const { error, busy, run } = useAsync()
+  const paged = usePaged(hosts)
 
   const reload = async () => {
     setHosts((await get('/api/v1/hosts')) ?? [])
@@ -79,11 +86,20 @@ export default function Hosts() {
       await reload()
     })
 
+  const openHost = (host: Host) =>
+    setEdit({
+      ...host,
+      directives: host.directives ?? [],
+      upstream_scheme: host.upstream_scheme || 'http',
+      load_balance: host.load_balance || 'round_robin',
+      upstreams: host.upstreams ?? [],
+    })
+
   return (
     <section>
       <div className="bar">
         <h2>Hosts</h2>
-        <button onClick={() => setEdit({ ...empty })}>+ Add host</button>
+        <button onClick={() => openHost(empty)}>+ Add host</button>
       </div>
       <Err msg={error} />
       <table>
@@ -99,22 +115,23 @@ export default function Hosts() {
           </tr>
         </thead>
         <tbody>
-          {hosts.map((h) => (
+          {paged.rows.map((h) => (
             <tr key={h.id}>
               <td>{h.domains.join(', ')}</td>
               <td>{h.type}</td>
-              <td>{h.target}</td>
+              <td>{h.type === 'load_balancer' ? `${h.upstreams?.length ?? 0} backends` : h.target}</td>
               <td>{h.cert_id ? (h.force_ssl ? 'forced' : 'yes') : '—'}</td>
               <td>{h.waf ? 'on' : 'off'}</td>
               <td>{h.enabled ? '✓' : '✗'}</td>
               <td>
-                <button onClick={() => setEdit({ ...h })}>Edit</button>{' '}
+                <button onClick={() => openHost(h)}>Edit</button>{' '}
                 <button onClick={() => remove(h.id)}>Delete</button>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      <Pagination {...paged} />
 
       {edit && (
         <Modal onClose={() => setEdit(null)}>
@@ -132,21 +149,147 @@ export default function Hosts() {
           <Row label="Type">
             <select value={edit.type} onChange={(e) => setEdit({ ...edit, type: e.target.value as Host['type'] })}>
               <option value="proxy">proxy</option>
+              <option value="load_balancer">load balancer</option>
               <option value="redirect">redirect</option>
               <option value="static">static</option>
             </select>
           </Row>
-          <Row
-            label={
-              edit.type === 'proxy'
-                ? 'Upstream (http://host:port)'
-                : edit.type === 'redirect'
-                  ? 'Redirect to (URL)'
-                  : 'Directory under /data/www'
-            }
-          >
-            <input value={edit.target} onChange={(e) => setEdit({ ...edit, target: e.target.value })} />
-          </Row>
+          {edit.type === 'load_balancer' ? (
+            <>
+              <Row label="Upstream protocol">
+                <select
+                  value={edit.upstream_scheme}
+                  onChange={(e) => setEdit({ ...edit, upstream_scheme: e.target.value as Host['upstream_scheme'] })}
+                >
+                  <option value="http">HTTP</option>
+                  <option value="https">HTTPS</option>
+                </select>
+              </Row>
+              <Row label="Load balancing method">
+                <select
+                  value={edit.load_balance}
+                  onChange={(e) => {
+                    const load_balance = e.target.value as Host['load_balance']
+                    setEdit({
+                      ...edit,
+                      load_balance,
+                      upstreams:
+                        load_balance === 'ip_hash'
+                          ? edit.upstreams.map((upstream) => ({ ...upstream, backup: false }))
+                          : edit.upstreams,
+                    })
+                  }}
+                >
+                  <option value="round_robin">Round robin</option>
+                  <option value="least_conn">Least connections</option>
+                  <option value="ip_hash">IP hash (sticky by client IP)</option>
+                </select>
+              </Row>
+              <Row label="Backends (at least two)">
+                <div>
+                  {edit.upstreams.map((upstream, i) => (
+                    <div
+                      key={i}
+                      style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 2fr) 80px 90px 100px auto auto', gap: 6, marginBottom: 6, alignItems: 'center' }}
+                    >
+                      <input
+                        required
+                        placeholder="app-1:3000"
+                        title="Backend address (host:port)"
+                        value={upstream.address}
+                        onChange={(e) => {
+                          const upstreams = [...edit.upstreams]
+                          upstreams[i] = { ...upstream, address: e.target.value }
+                          setEdit({ ...edit, upstreams })
+                        }}
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        max={1000}
+                        title="Weight (0 uses the nginx default)"
+                        value={upstream.weight}
+                        onChange={(e) => {
+                          const upstreams = [...edit.upstreams]
+                          upstreams[i] = { ...upstream, weight: +e.target.value }
+                          setEdit({ ...edit, upstreams })
+                        }}
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        max={1000}
+                        title="Failures before the backend is considered unavailable"
+                        value={upstream.max_fails}
+                        onChange={(e) => {
+                          const upstreams = [...edit.upstreams]
+                          upstreams[i] = { ...upstream, max_fails: +e.target.value }
+                          setEdit({ ...edit, upstreams })
+                        }}
+                      />
+                      <input
+                        placeholder="10s"
+                        title="Failure timeout (for example 10s or 1m)"
+                        value={upstream.fail_timeout}
+                        onChange={(e) => {
+                          const upstreams = [...edit.upstreams]
+                          upstreams[i] = { ...upstream, fail_timeout: e.target.value }
+                          setEdit({ ...edit, upstreams })
+                        }}
+                      />
+                      <label className="check" title="Only use this backend when primary backends are unavailable">
+                        <input
+                          type="checkbox"
+                          checked={upstream.backup}
+                          disabled={edit.load_balance === 'ip_hash'}
+                          onChange={(e) => {
+                            const upstreams = [...edit.upstreams]
+                            upstreams[i] = { ...upstream, backup: e.target.checked }
+                            setEdit({ ...edit, upstreams })
+                          }}
+                        />
+                        backup
+                      </label>
+                      <button
+                        type="button"
+                        aria-label={`Remove backend ${i + 1}`}
+                        onClick={() => setEdit({ ...edit, upstreams: edit.upstreams.filter((_, j) => j !== i) })}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <p className="hint">Columns: address, weight, max failures, failure timeout, backup.</p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEdit({
+                        ...edit,
+                        upstreams: [
+                          ...edit.upstreams,
+                          { address: '', weight: 1, max_fails: 1, fail_timeout: '10s', backup: false },
+                        ],
+                      })
+                    }
+                  >
+                    + Add backend
+                  </button>
+                </div>
+              </Row>
+            </>
+          ) : (
+            <Row
+              label={
+                edit.type === 'proxy'
+                  ? 'Upstream (http://host:port)'
+                  : edit.type === 'redirect'
+                    ? 'Redirect to (URL)'
+                    : 'Directory under /data/www'
+              }
+            >
+              <input value={edit.target} onChange={(e) => setEdit({ ...edit, target: e.target.value })} />
+            </Row>
+          )}
           <CertPicker
             value={edit.cert_id}
             certs={certs}
@@ -172,7 +315,7 @@ export default function Hosts() {
             <Check label="HSTS" checked={edit.hsts} onChange={(v) => setEdit({ ...edit, hsts: v })} />
             <Check label="Websockets" checked={edit.websocket} onChange={(v) => setEdit({ ...edit, websocket: v })} />
             <Check label="WAF (ModSecurity + CRS)" checked={edit.waf} onChange={(v) => setEdit({ ...edit, waf: v })} />
-            {edit.type === 'proxy' && (
+            {(edit.type === 'proxy' || edit.type === 'load_balancer') && (
               <Check label="Cache" checked={edit.cache} onChange={(v) => setEdit({ ...edit, cache: v })} />
             )}
           </div>

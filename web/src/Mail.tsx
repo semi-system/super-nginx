@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { get, post, put, del, MailListener, MailDomain, Cert } from './api'
-import { Err, Row, Check, Modal, useAsync } from './ui'
+import { Err, Row, Check, Modal, Pagination, useAsync, usePaged } from './ui'
 import CertPicker from './CertPicker'
 
 const emptyListener: MailListener = {
@@ -27,6 +27,8 @@ export default function Mail() {
   const [editL, setEditL] = useState<MailListener | null>(null)
   const [editD, setEditD] = useState<MailDomain | null>(null)
   const { error, busy, run } = useAsync()
+  const domainPaged = usePaged(domains)
+  const listenerPaged = usePaged(listeners)
 
   const reload = async () => {
     setListeners((await get('/api/v1/mail/listeners')) ?? [])
@@ -106,7 +108,7 @@ export default function Mail() {
           </tr>
         </thead>
         <tbody>
-          {domains.map((d) => (
+          {domainPaged.rows.map((d) => (
             <tr key={d.id}>
               <td>{d.domain}</td>
               <td>{certs.find((c) => c.id === d.cert_id)?.name || '—'}</td>
@@ -118,6 +120,7 @@ export default function Mail() {
           ))}
         </tbody>
       </table>
+      <Pagination {...domainPaged} />
 
       {editD && (
         <Modal onClose={() => setEditD(null)}>
@@ -161,7 +164,7 @@ export default function Mail() {
           </tr>
         </thead>
         <tbody>
-          {listeners.map((l) => (
+          {listenerPaged.rows.map((l) => (
             <tr key={l.id}>
               <td>{l.label}</td>
               <td>{l.port}</td>
@@ -176,6 +179,7 @@ export default function Mail() {
           ))}
         </tbody>
       </table>
+      <Pagination {...listenerPaged} />
 
       {editL && (
         <Modal onClose={() => setEditL(null)}>

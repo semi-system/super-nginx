@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { get, post, put, del, StreamRule } from './api'
-import { Err, Row, Check, Modal, useAsync } from './ui'
+import { Err, Row, Check, Modal, Pagination, useAsync, usePaged } from './ui'
 
 const empty: StreamRule = { id: 0, port: 15000, udp: false, backend: '', enabled: true }
 
@@ -8,6 +8,7 @@ export default function Streams() {
   const [rules, setRules] = useState<StreamRule[]>([])
   const [edit, setEdit] = useState<StreamRule | null>(null)
   const { error, busy, run } = useAsync()
+  const paged = usePaged(rules)
 
   const reload = async () => setRules((await get('/api/v1/streams')) ?? [])
   useEffect(() => {
@@ -48,7 +49,7 @@ export default function Streams() {
           </tr>
         </thead>
         <tbody>
-          {rules.map((r) => (
+          {paged.rows.map((r) => (
             <tr key={r.id}>
               <td>{r.port}</td>
               <td>{r.udp ? 'udp' : 'tcp'}</td>
@@ -62,6 +63,7 @@ export default function Streams() {
           ))}
         </tbody>
       </table>
+      <Pagination {...paged} />
 
       {edit && (
         <Modal onClose={() => setEdit(null)}>

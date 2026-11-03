@@ -160,6 +160,9 @@ func renderHTTP(s *store.State) []byte {
 		if !h.Enabled {
 			continue
 		}
+		if h.Type == "load_balancer" {
+			writeUpstream(b, h)
+		}
 		writeHost(b, s, h)
 	}
 	return b.Bytes()
@@ -204,7 +207,36 @@ func writeDefaultServer(b *bytes.Buffer, set store.Settings) {
 // cacheZone is the shared-memory zone name for a host's proxy cache.
 func cacheZone(id int) string { return fmt.Sprintf("sn_cache_%d", id) }
 
-func cacheEnabled(h store.Host) bool { return h.Type == "proxy" && h.Cache }
+func cacheEnabled(h store.Host) bool {
+	return (h.Type == "proxy" || h.Type == "load_balancer") && h.Cache
+}
+
+func upstreamName(id int) string { return fmt.Sprintf("sn_lb_%d", id) }
+
+func writeUpstream(b *bytes.Buffer, h store.Host) {
+	fmt.Fprintf(b, "\nupstream %s {\n", upstreamName(h.ID))
+	switch h.LoadBalance {
+	case "least_conn":
+		fmt.Fprint(b, "    least_conn;\n")
+	case "ip_hash":
+		fmt.Fprint(b, "    ip_hash;\n")
+	}
+	for _, u := range h.Upstreams {
+		fmt.Fprintf(b, "    server %s", u.Address)
+		if u.Weight > 0 {
+			fmt.Fprintf(b, " weight=%d", u.Weight)
+		}
+		fmt.Fprintf(b, " max_fails=%d", u.MaxFails)
+		if u.FailTimeout != "" {
+			fmt.Fprintf(b, " fail_timeout=%s", u.FailTimeout)
+		}
+		if u.Backup {
+			fmt.Fprint(b, " backup")
+		}
+		fmt.Fprint(b, ";\n")
+	}
+	fmt.Fprint(b, "}\n")
+}
 
 func cacheTime(h store.Host) string {
 	if h.CacheTime == "" {
@@ -316,10 +348,14 @@ func writeContent(b *bytes.Buffer, s *store.State, h store.Host) {
 			fmt.Fprintf(b, "%s\n", indent(indent(h.LocationSnippet)))
 		}
 		fmt.Fprint(b, "    }\n")
-	default: // proxy
+	default: // proxy or load_balancer
 		fmt.Fprint(b, "    location / {\n")
 		fmt.Fprint(b, access)
-		fmt.Fprintf(b, "        proxy_pass %s;\n", h.Target)
+		if h.Type == "load_balancer" {
+			fmt.Fprintf(b, "        proxy_pass %s://%s;\n", h.UpstreamScheme, upstreamName(h.ID))
+		} else {
+			fmt.Fprintf(b, "        proxy_pass %s;\n", h.Target)
+		}
 		fmt.Fprint(b, "        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n")
 		if h.Websocket {
 			fmt.Fprint(b, "        proxy_http_version 1.1;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection $sn_connection;\n")

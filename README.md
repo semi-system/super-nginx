@@ -8,7 +8,8 @@ supervisor nginx + REST API + frontend embed.
 
 Xem [PLAN.md](PLAN.md) — kiến trúc + lộ trình. Trạng thái: **Phase 1–5 hoạt động**:
 
-- Hosts: proxy / redirect / static, HTTP/2, HSTS, websocket, force-SSL,
+- Hosts: proxy / load balancer / redirect / static, HTTP/2, HSTS, websocket, force-SSL,
+  load balancing round-robin / least-connections / IP hash, backend weight + passive failover,
   custom nginx snippet (server + location), WAF ModSecurity+CRS **per-host**
 - Pipeline an toàn: mọi thay đổi → render → `nginx -t` → reload; config hỏng
   bị từ chối kèm nguyên văn lỗi, tự rollback
