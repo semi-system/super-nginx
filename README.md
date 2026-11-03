@@ -14,7 +14,9 @@ Xem [PLAN.md](PLAN.md) — kiến trúc + lộ trình. Trạng thái: **Phase 1�
 - Pipeline an toàn: mọi thay đổi → render → `nginx -t` → reload; config hỏng
   bị từ chối kèm nguyên văn lỗi, tự rollback
 - Certificates: upload custom (validate key/SAN/expiry), Let's Encrypt qua
-  lego nhúng (HTTP-01 + DNS-01/wildcard, ~100 provider), auto-renew <30 ngày
+  lego nhúng (HTTP-01 + DNS-01/wildcard, ~100 provider), auto-renew <30 ngày;
+  tùy chọn isolate cấp một cert riêng cho từng domain trong cùng host để SAN
+  không làm lộ các domain còn lại
 - Mail proxy (stream): TLS terminate với SNI — mỗi domain một cert trên cùng
   port, dùng chung cert với HTTPS host; passthrough cho port plain/STARTTLS;
   auth ở backend

@@ -39,6 +39,8 @@ const empty: Host = {
     { address: '', weight: 1, max_fails: 1, fail_timeout: '10s', backup: false },
   ],
   cert_id: 0,
+  isolate_certs: false,
+  domain_certs: {},
   force_ssl: false,
   http2: true,
   hsts: false,
@@ -90,6 +92,7 @@ export default function Hosts() {
     setEdit({
       ...host,
       directives: host.directives ?? [],
+      domain_certs: host.domain_certs ?? {},
       upstream_scheme: host.upstream_scheme || 'http',
       load_balance: host.load_balance || 'round_robin',
       upstreams: host.upstreams ?? [],
@@ -120,7 +123,15 @@ export default function Hosts() {
               <td>{h.domains.join(', ')}</td>
               <td>{h.type}</td>
               <td>{h.type === 'load_balancer' ? `${h.upstreams?.length ?? 0} backends` : h.target}</td>
-              <td>{h.cert_id ? (h.force_ssl ? 'forced' : 'yes') : '—'}</td>
+              <td>
+                {h.isolate_certs
+                  ? `${h.force_ssl ? 'forced · ' : ''}isolated ${Object.keys(h.domain_certs ?? {}).length}/${h.domains.length}`
+                  : h.cert_id
+                    ? h.force_ssl
+                      ? 'forced'
+                      : 'yes'
+                    : '—'}
+              </td>
               <td>{h.waf ? 'on' : 'off'}</td>
               <td>{h.enabled ? '✓' : '✗'}</td>
               <td>
@@ -295,8 +306,16 @@ export default function Hosts() {
             certs={certs}
             defaultDomains={edit.domains}
             noneLabel="— none (http only) —"
-            onChange={(id) => setEdit({ ...edit, cert_id: id })}
+            onChange={(id) => setEdit((current) => (current ? { ...current, cert_id: id } : current))}
             onCertsChanged={setCerts}
+            isolate={edit.isolate_certs}
+            domainCerts={edit.domain_certs}
+            onIsolateChange={(isolate_certs) =>
+              setEdit((current) => (current ? { ...current, isolate_certs } : current))
+            }
+            onDomainCertsChange={(domain_certs) =>
+              setEdit((current) => (current ? { ...current, cert_id: 0, domain_certs } : current))
+            }
           />
           <Row label="Access list">
             <select value={edit.access_list_id} onChange={(e) => setEdit({ ...edit, access_list_id: +e.target.value })}>

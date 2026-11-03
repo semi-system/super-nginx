@@ -30,6 +30,8 @@ type Host struct {
 	LoadBalance     string          `json:"load_balance,omitempty"`    // round_robin | least_conn | ip_hash
 	Upstreams       []Upstream      `json:"upstreams,omitempty"`
 	CertID          int             `json:"cert_id"`
+	IsolateCerts    bool            `json:"isolate_certs,omitempty"`
+	DomainCerts     map[string]int  `json:"domain_certs,omitempty"` // isolated TLS: domain -> single-domain cert id
 	ForceSSL        bool            `json:"force_ssl"`
 	HTTP2           bool            `json:"http2"`
 	HSTS            bool            `json:"hsts"`

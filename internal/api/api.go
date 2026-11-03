@@ -2,7 +2,6 @@
 // lock store -> validate + mutate state -> engine.Apply (render, nginx -t,
 // reload; auto-rollback) -> save. A failed apply reloads state from disk so
 // memory never drifts from the last good config.
-//
 package api
 
 import (
@@ -113,9 +112,21 @@ func (a *API) applyLocked() error {
 // mutate runs fn on state under the lock, then applies + saves; on apply
 // failure state is rolled back and the nginx -t output returned to the client.
 func (a *API) mutate(w http.ResponseWriter, r *http.Request, fn func(*store.State) error) {
+	a.mutateResult(w, r, func(s *store.State) (any, error) {
+		if err := fn(s); err != nil {
+			return nil, err
+		}
+		return map[string]string{"status": "ok"}, nil
+	})
+}
+
+// mutateResult is mutate plus a caller-provided success response. It is used
+// when a mutation creates ids the UI must attach in a following request.
+func (a *API) mutateResult(w http.ResponseWriter, r *http.Request, fn func(*store.State) (any, error)) {
 	a.St.Mu.Lock()
 	defer a.St.Mu.Unlock()
-	if err := fn(&a.St.S); err != nil {
+	result, err := fn(&a.St.S)
+	if err != nil {
 		fail(w, 400, "%s", err)
 		return
 	}
@@ -129,7 +140,7 @@ func (a *API) mutate(w http.ResponseWriter, r *http.Request, fn func(*store.Stat
 		return
 	}
 	a.audit(r)
-	jsonOut(w, 200, map[string]string{"status": "ok"})
+	jsonOut(w, 200, result)
 }
 
 // ---- validation -------------------------------------------------------------
@@ -140,10 +151,16 @@ func checkDomains(ds []string) error {
 	if len(ds) == 0 {
 		return fmt.Errorf("at least one domain required")
 	}
+	seen := make(map[string]bool, len(ds))
 	for _, d := range ds {
 		if !domainRe.MatchString(d) {
 			return fmt.Errorf("invalid domain %q", d)
 		}
+		key := strings.ToLower(d)
+		if seen[key] {
+			return fmt.Errorf("domain %q is duplicated", d)
+		}
+		seen[key] = true
 	}
 	return nil
 }
@@ -258,11 +275,34 @@ func checkHost(s *store.State, h *store.Host) error {
 	default:
 		return fmt.Errorf("type must be proxy, load_balancer, redirect or static")
 	}
-	if h.CertID != 0 && s.CertByID(h.CertID) == nil {
-		return fmt.Errorf("cert %d not found", h.CertID)
-	}
-	if h.CertID == 0 && h.ForceSSL {
-		return fmt.Errorf("force_ssl requires a certificate")
+	if h.IsolateCerts {
+		normalized := make(map[string]int, len(h.Domains))
+		for _, domain := range h.Domains {
+			id := 0
+			for mappedDomain, mappedID := range h.DomainCerts {
+				if strings.EqualFold(mappedDomain, domain) {
+					id = mappedID
+					break
+				}
+			}
+			c := s.CertByID(id)
+			if c == nil {
+				return fmt.Errorf("isolated certificate required for domain %q", domain)
+			}
+			if len(c.Domains) != 1 || !strings.EqualFold(c.Domains[0], domain) {
+				return fmt.Errorf("cert %d for %q must contain that domain only", id, domain)
+			}
+			normalized[domain] = id
+		}
+		h.DomainCerts = normalized
+		h.CertID = 0
+	} else {
+		if h.CertID != 0 && s.CertByID(h.CertID) == nil {
+			return fmt.Errorf("cert %d not found", h.CertID)
+		}
+		if h.CertID == 0 && h.ForceSSL {
+			return fmt.Errorf("force_ssl requires a certificate")
+		}
 	}
 	if h.AccessListID != 0 && s.AccessListByID(h.AccessListID) == nil {
 		return fmt.Errorf("access list %d not found", h.AccessListID)
@@ -386,6 +426,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	auth("GET /api/v1/certs", a.listCerts)
 	auth("POST /api/v1/certs/custom", a.createCustomCert)
 	auth("POST /api/v1/certs/acme", a.createACMECert)
+	auth("POST /api/v1/certs/acme/isolated", a.createIsolatedACMECerts)
 	auth("POST /api/v1/certs/{id}/renew", a.renewCert)
 	auth("GET /api/v1/certs/{id}/download", a.downloadCert)
 	auth("DELETE /api/v1/certs/{id}", a.deleteCert)
@@ -680,30 +721,41 @@ func (a *API) createCustomCert(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *API) createACMECert(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Name        string            `json:"name"`
-		Domains     []string          `json:"domains"`
-		Challenge   string            `json:"challenge"`
-		DNSProvider string            `json:"dns_provider"`
-		DNSEnv      map[string]string `json:"dns_env"`
-	}
-	if err := decode(r, &in); err != nil || in.Name == "" {
-		fail(w, 400, "bad request")
-		return
+type acmeRequest struct {
+	Name        string            `json:"name"`
+	Domains     []string          `json:"domains"`
+	Challenge   string            `json:"challenge"`
+	DNSProvider string            `json:"dns_provider"`
+	DNSEnv      map[string]string `json:"dns_env"`
+}
+
+func checkACMERequest(in *acmeRequest) error {
+	if in.Name == "" {
+		return fmt.Errorf("name required")
 	}
 	if err := checkDomains(in.Domains); err != nil {
-		fail(w, 400, "%s", err)
-		return
+		return err
 	}
 	if in.Challenge != "dns" {
 		in.Challenge = "http"
 		for _, d := range in.Domains {
 			if strings.HasPrefix(d, "*.") {
-				fail(w, 400, "wildcard domains require the dns challenge")
-				return
+				return fmt.Errorf("wildcard domains require the dns challenge")
 			}
 		}
+	}
+	return nil
+}
+
+func (a *API) createACMECert(w http.ResponseWriter, r *http.Request) {
+	var in acmeRequest
+	if err := decode(r, &in); err != nil || in.Name == "" {
+		fail(w, 400, "bad request")
+		return
+	}
+	if err := checkACMERequest(&in); err != nil {
+		fail(w, 400, "%s", err)
+		return
 	}
 	a.mutate(w, r, func(s *store.State) error {
 		c := store.Cert{
@@ -716,6 +768,51 @@ func (a *API) createACMECert(w http.ResponseWriter, r *http.Request) {
 		}
 		s.Certs = append(s.Certs, c)
 		return nil
+	})
+}
+
+// createIsolatedACMECerts obtains one single-domain certificate per requested
+// domain. Keeping each SAN list at length one prevents a TLS handshake on one
+// name from revealing the other names configured on the same host.
+func (a *API) createIsolatedACMECerts(w http.ResponseWriter, r *http.Request) {
+	var in acmeRequest
+	if err := decode(r, &in); err != nil {
+		fail(w, 400, "bad request: %s", err)
+		return
+	}
+	if err := checkACMERequest(&in); err != nil {
+		fail(w, 400, "%s", err)
+		return
+	}
+
+	a.mutateResult(w, r, func(s *store.State) (any, error) {
+		startSeq := s.Seq
+		created := make([]store.Cert, 0, len(in.Domains))
+		ids := make(map[string]int, len(in.Domains))
+		cleanup := func(currentID int) {
+			s.Seq = startSeq
+			if currentID != 0 {
+				certs.RemoveFiles(currentID)
+			}
+			for _, c := range created {
+				certs.RemoveFiles(c.ID)
+			}
+		}
+		for _, domain := range in.Domains {
+			c := store.Cert{
+				ID: s.NextID(), Name: fmt.Sprintf("%s [%s]", in.Name, domain),
+				Type: "acme", Domains: []string{domain}, Challenge: in.Challenge,
+				DNSProvider: in.DNSProvider, DNSEnv: in.DNSEnv,
+			}
+			if err := certs.Issue(&c, s.Settings); err != nil {
+				cleanup(c.ID)
+				return nil, fmt.Errorf("ACME issue for %s failed: %w", domain, err)
+			}
+			created = append(created, c)
+			ids[domain] = c.ID
+		}
+		s.Certs = append(s.Certs, created...)
+		return map[string]any{"status": "ok", "cert_ids": ids}, nil
 	})
 }
 
@@ -809,8 +906,15 @@ func (a *API) deleteCert(w http.ResponseWriter, r *http.Request) {
 	}
 	a.mutate(w, r, func(s *store.State) error {
 		for _, h := range s.Hosts {
-			if h.CertID == id {
+			if !h.IsolateCerts && h.CertID == id {
 				return fmt.Errorf("cert in use by host %d (%s)", h.ID, strings.Join(h.Domains, " "))
+			}
+			if h.IsolateCerts {
+				for domain, certID := range h.DomainCerts {
+					if certID == id {
+						return fmt.Errorf("cert in use by host %d (%s)", h.ID, domain)
+					}
+				}
 			}
 		}
 		for _, d := range s.MailDomains {

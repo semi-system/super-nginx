@@ -248,6 +248,16 @@ func cacheTime(h store.Host) string {
 func writeHost(b *bytes.Buffer, s *store.State, h store.Host) {
 	names := strings.Join(h.Domains, " ")
 	cert := s.CertByID(h.CertID)
+	hasTLS := cert != nil
+	if h.IsolateCerts {
+		hasTLS = len(h.Domains) > 0
+		for _, domain := range h.Domains {
+			if s.CertByID(h.DomainCerts[domain]) == nil {
+				hasTLS = false
+				break
+			}
+		}
+	}
 
 	// proxy_cache_path is http-level (hosts.conf is included inside http{});
 	// declared once per host, both the :8080 and :8443 servers reference it.
@@ -262,7 +272,7 @@ func writeHost(b *bytes.Buffer, s *store.State, h store.Host) {
 	fmt.Fprintf(b, "\n# host %d (%s)\nserver {\n    listen 8080;\n    server_name %s;\n", h.ID, h.Type, names)
 	fmt.Fprint(b, statsLog(h.ID))
 	fmt.Fprint(b, acmeLocation)
-	if cert != nil && h.ForceSSL {
+	if hasTLS && h.ForceSSL {
 		fmt.Fprint(b, "    location / {\n        return 301 https://$host$request_uri;\n    }\n}\n")
 	} else {
 		writeServerCommon(b, h)
@@ -270,9 +280,24 @@ func writeHost(b *bytes.Buffer, s *store.State, h store.Host) {
 		fmt.Fprint(b, "}\n")
 	}
 
+	if h.IsolateCerts {
+		for _, domain := range h.Domains {
+			if domainCert := s.CertByID(h.DomainCerts[domain]); domainCert != nil {
+				writeTLSHost(b, s, h, domain, domainCert)
+			}
+		}
+		return
+	}
 	if cert == nil {
 		return
 	}
+	writeTLSHost(b, s, h, names, cert)
+}
+
+// writeTLSHost emits one TLS virtual server. Shared certificates call it once
+// with every host name; isolated certificates call it once per domain so SNI
+// can never serve a certificate whose SAN list reveals sibling domains.
+func writeTLSHost(b *bytes.Buffer, s *store.State, h store.Host, names string, cert *store.Cert) {
 	fullchain, privkey := CertPath(cert.ID)
 	fmt.Fprintf(b, "server {\n    listen 8443 ssl;\n")
 	if h.HTTP2 {

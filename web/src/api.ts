@@ -24,6 +24,8 @@ export type Host = {
   load_balance: 'round_robin' | 'least_conn' | 'ip_hash'
   upstreams: Upstream[]
   cert_id: number
+  isolate_certs: boolean
+  domain_certs: Record<string, number>
   force_ssl: boolean
   http2: boolean
   hsts: boolean

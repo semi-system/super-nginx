@@ -98,6 +98,34 @@ func TestStatsLogRendered(t *testing.T) {
 	}
 }
 
+func TestIsolatedCertificatesRenderSeparateSNIServers(t *testing.T) {
+	s := &store.State{
+		Certs: []store.Cert{
+			{ID: 21, Name: "a", Type: "acme", Domains: []string{"a.example.com"}},
+			{ID: 22, Name: "b", Type: "acme", Domains: []string{"b.example.com"}},
+		},
+		Hosts: []store.Host{{
+			ID: 20, Type: "proxy", Domains: []string{"a.example.com", "b.example.com"},
+			Target: "http://127.0.0.1:3000", IsolateCerts: true,
+			DomainCerts: map[string]int{"a.example.com": 21, "b.example.com": 22},
+			ForceSSL:    true, Enabled: true,
+		}},
+	}
+	got := string(renderHTTP(s))
+	for _, want := range []string{
+		"server_name a.example.com;\n    ssl_certificate /data/certs/21/fullchain.pem;",
+		"server_name b.example.com;\n    ssl_certificate /data/certs/22/fullchain.pem;",
+		"return 301 https://$host$request_uri;",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("isolated TLS config missing %q, got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "server_name a.example.com b.example.com;\n    ssl_certificate") {
+		t.Fatalf("isolated domains leaked into one TLS server block:\n%s", got)
+	}
+}
+
 // The catch-all server must exist for every action, never leak nginx's own
 // pages, and always keep answering ACME challenges.
 func TestDefaultServer(t *testing.T) {
