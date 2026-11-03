@@ -1,16 +1,32 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { get, post, del, Cert } from './api'
 import { Err, Row, Modal, Pagination, useAsync, usePaged } from './ui'
 import { dnsProviders } from './dnsProviders'
 
+function certIsExpired(cert: Cert) {
+  const expires = Date.parse(cert.expires_at)
+  return Number.isFinite(expires) && expires <= Date.now()
+}
+
 export default function Certs() {
   const [certs, setCerts] = useState<Cert[]>([])
   const [mode, setMode] = useState<'none' | 'custom' | 'acme'>('none')
+  const [notice, setNotice] = useState('')
+  const [search, setSearch] = useState('')
   const { error, busy, run, setError } = useAsync()
-  const paged = usePaged(certs)
+  const filteredCerts = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (!query) return certs
+    return certs.filter((cert) =>
+      [cert.name, cert.type, cert.challenge ?? '', cert.domains.join(' '), cert.last_error ?? 'ok']
+        .join(' ')
+        .toLowerCase()
+        .includes(query),
+    )
+  }, [certs, search])
+  const paged = usePaged(filteredCerts)
 
   // custom form
-  const [name, setName] = useState('')
   const [certPEM, setCertPEM] = useState('')
   const [keyPEM, setKeyPEM] = useState('')
   // acme form
@@ -28,9 +44,8 @@ export default function Certs() {
 
   const submitCustom = () =>
     run(async () => {
-      await post('/api/v1/certs/custom', { name, cert: certPEM, key: keyPEM })
+      await post('/api/v1/certs/custom', { cert: certPEM, key: keyPEM })
       setMode('none')
-      setName('')
       setCertPEM('')
       setKeyPEM('')
       await reload()
@@ -44,14 +59,12 @@ export default function Certs() {
         if (i > 0) env[line.slice(0, i).trim()] = line.slice(i + 1).trim()
       }
       await post('/api/v1/certs/acme', {
-        name,
         domains: domains.split(/[\s,]+/).filter(Boolean),
         challenge,
         dns_provider: provider,
         dns_env: env,
       })
       setMode('none')
-      setName('')
       setDomains('')
       await reload()
     })
@@ -69,14 +82,45 @@ export default function Certs() {
       await reload()
     })
 
+  const expiredCount = certs.filter(certIsExpired).length
+
+  const cleanupExpired = () =>
+    run(async () => {
+      if (!confirm(`Delete expired certificates that are no longer in use? (${expiredCount} found)`)) return
+      const result = await post<{
+        removed: { id: number; name: string }[]
+        skipped: { id: number; name: string; reason: string }[]
+      }>('/api/v1/certs/cleanup-expired')
+      const skipped = result.skipped.length
+        ? ` Skipped ${result.skipped.length}: ${result.skipped.map((c) => `${c.name} (${c.reason})`).join(', ')}.`
+        : ''
+      setNotice(`Removed ${result.removed.length} expired certificate(s).${skipped}`)
+      await reload()
+    })
+
   return (
     <section>
       <div className="bar">
         <h2>Certificates</h2>
+        <input
+          type="search"
+          aria-label="Search certificates"
+          placeholder="Search name, SAN, typeâ€¦"
+          style={{ width: 280 }}
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value)
+            paged.setPage(1)
+          }}
+        />
         <button onClick={() => { setMode('acme'); setError(null) }}>+ Let's Encrypt</button>
         <button onClick={() => { setMode('custom'); setError(null) }}>+ Upload custom</button>
+        <button type="button" disabled={busy || expiredCount === 0} onClick={cleanupExpired}>
+          Clean expired{expiredCount > 0 ? ` (${expiredCount})` : ''}
+        </button>
       </div>
       <Err msg={error} />
+      {notice && <p className="ok">{notice}</p>}
       <table>
         <thead>
           <tr>
@@ -95,7 +139,9 @@ export default function Certs() {
               <td>{c.type === 'acme' ? `acme/${c.challenge}` : 'custom'}</td>
               <td>{c.domains.join(', ')}</td>
               <td>{c.expires_at ? new Date(c.expires_at).toLocaleDateString() : '—'}</td>
-              <td className={c.last_error ? 'error' : ''}>{c.last_error || 'ok'}</td>
+              <td className={certIsExpired(c) || c.last_error ? 'error' : ''}>
+                {certIsExpired(c) ? 'expired' : c.last_error || 'ok'}
+              </td>
               <td>
                 {c.type === 'acme' && (
                   <button disabled={busy} onClick={() => renew(c.id)}>
@@ -117,9 +163,6 @@ export default function Certs() {
         <Modal onClose={() => setMode('none')}>
         <form className="editor" onSubmit={(e) => { e.preventDefault(); submitCustom() }}>
           <h3>Upload certificate</h3>
-          <Row label="Name">
-            <input value={name} onChange={(e) => setName(e.target.value)} />
-          </Row>
           <Row label="Certificate (fullchain PEM)">
             <textarea rows={6} value={certPEM} onChange={(e) => setCertPEM(e.target.value)} />
           </Row>
@@ -142,9 +185,6 @@ export default function Certs() {
             HTTP challenge needs port 80 → 8080 reachable from the internet. Wildcards need the DNS
             challenge. Set the ACME email in Settings first.
           </p>
-          <Row label="Name">
-            <input value={name} onChange={(e) => setName(e.target.value)} />
-          </Row>
           <Row label="Domains (space separated)">
             <input value={domains} onChange={(e) => setDomains(e.target.value)} placeholder="example.com *.example.com" />
           </Row>

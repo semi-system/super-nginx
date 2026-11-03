@@ -156,6 +156,8 @@ button:not(.btn) {
   transition: var(--transition-fast);
 }
 button:not(.btn):hover { background: var(--bg-muted); color: var(--color-primary); border-color: var(--color-primary); }
+button:not(.btn).ok { color: var(--color-success); }
+button:not(.btn).error { color: var(--color-danger); }
 button:not(.btn)[type='submit'] {
   background: var(--color-primary);
   border-color: var(--color-primary);

@@ -1,10 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { get, post, put, del, Host, Cert } from './api'
 import { Err, Row, Check, Modal, Pagination, useAsync, usePaged } from './ui'
 import CertPicker from './CertPicker'
 import DomainInput from './DomainInput'
 
 type AccessListOut = { id: number; name: string }
+
+type BackendHealth = {
+  address: string
+  healthy: boolean
+  status_code?: number
+  latency_ms: number
+  error?: string
+  checked_at: string
+}
 
 // Preset rules: pick one and the row is filled with a sensible default value.
 // Value stays editable, and "Custom…" adds a blank row for anything else.
@@ -38,8 +47,11 @@ const empty: Host = {
     { address: '', weight: 1, max_fails: 1, fail_timeout: '10s', backup: false },
     { address: '', weight: 1, max_fails: 1, fail_timeout: '10s', backup: false },
   ],
+  health_check: true,
+  health_check_path: '/',
+  health_check_timeout: 3,
   cert_id: 0,
-  isolate_certs: false,
+  isolate_certs: true,
   domain_certs: {},
   force_ssl: false,
   http2: true,
@@ -60,8 +72,42 @@ export default function Hosts() {
   const [certs, setCerts] = useState<Cert[]>([])
   const [acls, setAcls] = useState<AccessListOut[]>([])
   const [edit, setEdit] = useState<Host | null>(null)
+  const [health, setHealth] = useState<Record<number, BackendHealth[]>>({})
+  const [healthBusy, setHealthBusy] = useState<Record<number, boolean>>({})
+  const [healthError, setHealthError] = useState<Record<number, string>>({})
+  const [search, setSearch] = useState('')
   const { error, busy, run } = useAsync()
-  const paged = usePaged(hosts)
+  const filteredHosts = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (!query) return hosts
+    return hosts.filter((host) =>
+      [
+        host.domains.join(' '),
+        host.type,
+        host.target,
+        host.upstream_scheme,
+        host.load_balance,
+        host.upstreams?.map((upstream) => upstream.address).join(' ') ?? '',
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(query),
+    )
+  }, [hosts, search])
+  const paged = usePaged(filteredHosts)
+
+  const checkHealth = useCallback(async (host: Host) => {
+    setHealthBusy((current) => ({ ...current, [host.id]: true }))
+    setHealthError((current) => ({ ...current, [host.id]: '' }))
+    try {
+      const result = await get<{ backends: BackendHealth[] }>(`/api/v1/hosts/${host.id}/health`)
+      setHealth((current) => ({ ...current, [host.id]: result.backends }))
+    } catch (e: any) {
+      setHealthError((current) => ({ ...current, [host.id]: e.message || String(e) }))
+    } finally {
+      setHealthBusy((current) => ({ ...current, [host.id]: false }))
+    }
+  }, [])
 
   const reload = async () => {
     setHosts((await get('/api/v1/hosts')) ?? [])
@@ -71,6 +117,15 @@ export default function Hosts() {
   useEffect(() => {
     run(reload)
   }, [])
+
+  useEffect(() => {
+    const enabled = hosts.filter((host) => host.type === 'load_balancer' && host.health_check)
+    if (enabled.length === 0) return
+    const checkAll = () => enabled.forEach(checkHealth)
+    checkAll()
+    const timer = window.setInterval(checkAll, 30_000)
+    return () => window.clearInterval(timer)
+  }, [hosts, checkHealth])
 
   const save = () =>
     run(async () => {
@@ -96,12 +151,26 @@ export default function Hosts() {
       upstream_scheme: host.upstream_scheme || 'http',
       load_balance: host.load_balance || 'round_robin',
       upstreams: host.upstreams ?? [],
+      health_check: host.health_check ?? false,
+      health_check_path: host.health_check_path || '/',
+      health_check_timeout: host.health_check_timeout || 3,
     })
 
   return (
     <section>
       <div className="bar">
         <h2>Hosts</h2>
+        <input
+          type="search"
+          aria-label="Search hosts"
+          placeholder="Search domain, type, targetâ€¦"
+          style={{ width: 280 }}
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value)
+            paged.setPage(1)
+          }}
+        />
         <button onClick={() => openHost(empty)}>+ Add host</button>
       </div>
       <Err msg={error} />
@@ -111,6 +180,7 @@ export default function Hosts() {
             <th>Domains</th>
             <th>Type</th>
             <th>Target</th>
+            <th>Health</th>
             <th>SSL</th>
             <th>WAF</th>
             <th>On</th>
@@ -123,6 +193,32 @@ export default function Hosts() {
               <td>{h.domains.join(', ')}</td>
               <td>{h.type}</td>
               <td>{h.type === 'load_balancer' ? `${h.upstreams?.length ?? 0} backends` : h.target}</td>
+              <td>
+                {h.type !== 'load_balancer' ? (
+                  'â€”'
+                ) : !h.health_check ? (
+                  <span className="hint">off</span>
+                ) : healthError[h.id] ? (
+                  <button type="button" className="error" title={healthError[h.id]} onClick={() => checkHealth(h)}>
+                    check failed
+                  </button>
+                ) : health[h.id] ? (
+                  <button
+                    type="button"
+                    className={health[h.id].every((backend) => backend.healthy) ? 'ok' : 'error'}
+                    title={health[h.id]
+                      .map((backend) => `${backend.address}: ${backend.healthy ? `${backend.status_code} in ${backend.latency_ms}ms` : backend.error}`)
+                      .join('\n')}
+                    onClick={() => checkHealth(h)}
+                  >
+                    {health[h.id].filter((backend) => backend.healthy).length}/{health[h.id].length} healthy
+                  </button>
+                ) : (
+                  <button type="button" disabled={healthBusy[h.id]} onClick={() => checkHealth(h)}>
+                    {healthBusy[h.id] ? 'checkingâ€¦' : 'check'}
+                  </button>
+                )}
+              </td>
               <td>
                 {h.isolate_certs
                   ? `${h.force_ssl ? 'forced · ' : ''}isolated ${Object.keys(h.domain_certs ?? {}).length}/${h.domains.length}`
@@ -158,7 +254,17 @@ export default function Hosts() {
             <DomainInput value={edit.domains} onChange={(domains) => setEdit({ ...edit, domains })} />
           </Row>
           <Row label="Type">
-            <select value={edit.type} onChange={(e) => setEdit({ ...edit, type: e.target.value as Host['type'] })}>
+            <select
+              value={edit.type}
+              onChange={(e) => {
+                const type = e.target.value as Host['type']
+                setEdit({
+                  ...edit,
+                  type,
+                  health_check: type === 'load_balancer' && edit.type !== 'load_balancer' ? true : edit.health_check,
+                })
+              }}
+            >
               <option value="proxy">proxy</option>
               <option value="load_balancer">load balancer</option>
               <option value="redirect">redirect</option>
@@ -196,6 +302,37 @@ export default function Hosts() {
                   <option value="ip_hash">IP hash (sticky by client IP)</option>
                 </select>
               </Row>
+              <div className="checks">
+                <Check
+                  label="Active backend health check"
+                  checked={edit.health_check}
+                  onChange={(health_check) => setEdit({ ...edit, health_check })}
+                />
+              </div>
+              {edit.health_check && (
+                <Row label="Health check">
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) 140px', gap: 8 }}>
+                    <input
+                      required
+                      placeholder="/health"
+                      title="HTTP path; status 200-399 is healthy"
+                      value={edit.health_check_path}
+                      onChange={(e) => setEdit({ ...edit, health_check_path: e.target.value })}
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      title="Timeout in seconds"
+                      value={edit.health_check_timeout}
+                      onChange={(e) => setEdit({ ...edit, health_check_timeout: +e.target.value })}
+                    />
+                  </div>
+                  <p className="hint">
+                    GET path / timeout in seconds. Status 200-399 is healthy; the Hosts page refreshes probes every 30 seconds.
+                  </p>
+                </Row>
+              )}
               <Row label="Backends (at least two)">
                 <div>
                   {edit.upstreams.map((upstream, i) => (

@@ -8,6 +8,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -146,6 +147,7 @@ func (a *API) mutateResult(w http.ResponseWriter, r *http.Request, fn func(*stor
 // ---- validation -------------------------------------------------------------
 
 var domainRe = regexp.MustCompile(`^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$|^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$`)
+var certNameUnsafe = regexp.MustCompile(`[^a-z0-9.-]+`)
 
 func checkDomains(ds []string) error {
 	if len(ds) == 0 {
@@ -163,6 +165,49 @@ func checkDomains(ds []string) error {
 		seen[key] = true
 	}
 	return nil
+}
+
+func certDomainMatches(san, domain string) bool {
+	san = strings.ToLower(strings.TrimSpace(san))
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	if san == domain {
+		return true
+	}
+	if !strings.HasPrefix(san, "*.") || strings.HasPrefix(domain, "*.") {
+		return false
+	}
+	suffix := san[1:] // .example.com
+	label := strings.TrimSuffix(domain, suffix)
+	return label != domain && label != "" && !strings.Contains(label, ".")
+}
+
+func certCoversDomain(c *store.Cert, domain string) bool {
+	if c == nil {
+		return false
+	}
+	for _, san := range c.Domains {
+		if certDomainMatches(san, domain) {
+			return true
+		}
+	}
+	return false
+}
+
+func certIsCurrent(c *store.Cert) bool {
+	return c != nil && !c.ExpiresAt.IsZero() && c.ExpiresAt.After(time.Now())
+}
+
+func autoCertName(domain string) string {
+	stem := strings.ToLower(strings.TrimSpace(domain))
+	stem = strings.ReplaceAll(stem, "*.", "wildcard.")
+	stem = certNameUnsafe.ReplaceAllString(stem, "-")
+	stem = strings.Trim(stem, ".-")
+	if stem == "" {
+		stem = "certificate"
+	}
+	random := make([]byte, 4)
+	_, _ = rand.Read(random)
+	return fmt.Sprintf("%s-%d-%s", stem, time.Now().UTC().Unix(), hex.EncodeToString(random))
 }
 
 func checkHostPort(s string) error {
@@ -263,6 +308,24 @@ func checkHost(s *store.State, h *store.Host) error {
 		if primaries == 0 {
 			return fmt.Errorf("load balancer requires at least one primary backend")
 		}
+		if h.HealthCheck {
+			if h.HealthCheckPath == "" {
+				h.HealthCheckPath = "/"
+			}
+			checkURL, err := url.ParseRequestURI(h.HealthCheckPath)
+			if err != nil || !strings.HasPrefix(h.HealthCheckPath, "/") || strings.HasPrefix(h.HealthCheckPath, "//") || checkURL.IsAbs() || checkURL.Host != "" {
+				return fmt.Errorf("health check path must be a relative HTTP path starting with /")
+			}
+			if h.HealthCheckTimeout == 0 {
+				h.HealthCheckTimeout = 3
+			}
+			if h.HealthCheckTimeout < 1 || h.HealthCheckTimeout > 30 {
+				return fmt.Errorf("health check timeout must be 1-30 seconds")
+			}
+		} else {
+			h.HealthCheckPath = ""
+			h.HealthCheckTimeout = 0
+		}
 	case "redirect":
 		u, err := url.Parse(h.Target)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -275,6 +338,11 @@ func checkHost(s *store.State, h *store.Host) error {
 	default:
 		return fmt.Errorf("type must be proxy, load_balancer, redirect or static")
 	}
+	if h.Type != "load_balancer" {
+		h.HealthCheck = false
+		h.HealthCheckPath = ""
+		h.HealthCheckTimeout = 0
+	}
 	if h.IsolateCerts {
 		normalized := make(map[string]int, len(h.Domains))
 		for _, domain := range h.Domains {
@@ -285,9 +353,18 @@ func checkHost(s *store.State, h *store.Host) error {
 					break
 				}
 			}
+			if id == 0 {
+				if h.ForceSSL {
+					return fmt.Errorf("isolated certificate required for domain %q when force_ssl is enabled", domain)
+				}
+				continue
+			}
 			c := s.CertByID(id)
 			if c == nil {
-				return fmt.Errorf("isolated certificate required for domain %q", domain)
+				return fmt.Errorf("cert %d for domain %q not found", id, domain)
+			}
+			if !certIsCurrent(c) {
+				return fmt.Errorf("cert %d for domain %q is expired", id, domain)
 			}
 			if len(c.Domains) != 1 || !strings.EqualFold(c.Domains[0], domain) {
 				return fmt.Errorf("cert %d for %q must contain that domain only", id, domain)
@@ -297,8 +374,19 @@ func checkHost(s *store.State, h *store.Host) error {
 		h.DomainCerts = normalized
 		h.CertID = 0
 	} else {
-		if h.CertID != 0 && s.CertByID(h.CertID) == nil {
-			return fmt.Errorf("cert %d not found", h.CertID)
+		if h.CertID != 0 {
+			c := s.CertByID(h.CertID)
+			if c == nil {
+				return fmt.Errorf("cert %d not found", h.CertID)
+			}
+			if !certIsCurrent(c) {
+				return fmt.Errorf("cert %d is expired", h.CertID)
+			}
+			for _, domain := range h.Domains {
+				if !certCoversDomain(c, domain) {
+					return fmt.Errorf("cert %d does not cover host domain %q", h.CertID, domain)
+				}
+			}
 		}
 		if h.CertID == 0 && h.ForceSSL {
 			return fmt.Errorf("force_ssl requires a certificate")
@@ -422,11 +510,13 @@ func (a *API) Register(mux *http.ServeMux) {
 	auth("POST /api/v1/hosts", a.createHost)
 	auth("PUT /api/v1/hosts/{id}", a.updateHost)
 	auth("DELETE /api/v1/hosts/{id}", a.deleteHost)
+	auth("GET /api/v1/hosts/{id}/health", a.hostHealth)
 
 	auth("GET /api/v1/certs", a.listCerts)
 	auth("POST /api/v1/certs/custom", a.createCustomCert)
 	auth("POST /api/v1/certs/acme", a.createACMECert)
 	auth("POST /api/v1/certs/acme/isolated", a.createIsolatedACMECerts)
+	auth("POST /api/v1/certs/cleanup-expired", a.cleanupExpiredCerts)
 	auth("POST /api/v1/certs/{id}/renew", a.renewCert)
 	auth("GET /api/v1/certs/{id}/download", a.downloadCert)
 	auth("DELETE /api/v1/certs/{id}", a.deleteCert)
@@ -692,6 +782,112 @@ func (a *API) deleteHost(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type backendHealth struct {
+	Address    string    `json:"address"`
+	Healthy    bool      `json:"healthy"`
+	StatusCode int       `json:"status_code,omitempty"`
+	LatencyMS  int64     `json:"latency_ms"`
+	Error      string    `json:"error,omitempty"`
+	CheckedAt  time.Time `json:"checked_at"`
+}
+
+// probeBackend performs the same HTTP request shape that nginx proxies: the
+// public host name is sent in Host while the connection goes to the backend.
+// TLS verification is disabled to match nginx proxy_ssl_verify's default; the
+// configured backend address is still the only possible destination.
+func probeBackend(h store.Host, upstream store.Upstream) backendHealth {
+	result := backendHealth{Address: upstream.Address, CheckedAt: time.Now().UTC()}
+	timeout := time.Duration(h.HealthCheckTimeout) * time.Second
+	if timeout <= 0 {
+		timeout = 3 * time.Second
+	}
+	path := h.HealthCheckPath
+	if path == "" {
+		path = "/"
+	}
+
+	transport := &http.Transport{
+		Proxy:             nil,
+		DialContext:       (&net.Dialer{Timeout: timeout}).DialContext,
+		DisableKeepAlives: true,
+		TLSClientConfig:   &tls.Config{InsecureSkipVerify: true}, //nolint:gosec -- mirrors nginx upstream TLS defaults
+	}
+	client := &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	req, err := http.NewRequest(http.MethodGet, h.UpstreamScheme+"://"+upstream.Address+path, nil)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	if len(h.Domains) > 0 {
+		req.Host = strings.TrimPrefix(h.Domains[0], "*.")
+	}
+	req.Header.Set("User-Agent", "super-nginx-healthcheck/1.0")
+
+	started := time.Now()
+	resp, err := client.Do(req)
+	result.LatencyMS = time.Since(started).Milliseconds()
+	result.CheckedAt = time.Now().UTC()
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	defer resp.Body.Close()
+	result.StatusCode = resp.StatusCode
+	result.Healthy = resp.StatusCode >= 200 && resp.StatusCode < 400
+	if !result.Healthy {
+		result.Error = resp.Status
+	}
+	return result
+}
+
+func (a *API) hostHealth(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		fail(w, 400, "bad id")
+		return
+	}
+	a.St.Mu.Lock()
+	var host *store.Host
+	for i := range a.St.S.Hosts {
+		if a.St.S.Hosts[i].ID == id {
+			copy := a.St.S.Hosts[i]
+			host = &copy
+			break
+		}
+	}
+	a.St.Mu.Unlock()
+	if host == nil {
+		fail(w, 404, "host %d not found", id)
+		return
+	}
+	if host.Type != "load_balancer" {
+		fail(w, 400, "host %d is not a load balancer", id)
+		return
+	}
+	if !host.HealthCheck {
+		fail(w, 400, "health check is disabled for host %d", id)
+		return
+	}
+
+	results := make([]backendHealth, len(host.Upstreams))
+	var wg sync.WaitGroup
+	for i, upstream := range host.Upstreams {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i] = probeBackend(*host, upstream)
+		}()
+	}
+	wg.Wait()
+	jsonOut(w, 200, map[string]any{"path": host.HealthCheckPath, "backends": results})
+}
+
 // ---- certs ------------------------------------------------------------------
 
 func (a *API) listCerts(w http.ResponseWriter, _ *http.Request) {
@@ -702,8 +898,8 @@ func (a *API) listCerts(w http.ResponseWriter, _ *http.Request) {
 
 func (a *API) createCustomCert(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Name, Cert, Key string }
-	if err := decode(r, &in); err != nil || in.Name == "" {
-		fail(w, 400, "name, cert and key required")
+	if err := decode(r, &in); err != nil || in.Cert == "" || in.Key == "" {
+		fail(w, 400, "cert and key required")
 		return
 	}
 	domains, expires, err := certs.ParseCustom([]byte(in.Cert), []byte(in.Key))
@@ -712,7 +908,11 @@ func (a *API) createCustomCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mutate(w, r, func(s *store.State) error {
-		c := store.Cert{ID: s.NextID(), Name: in.Name, Type: "custom", Domains: domains, ExpiresAt: expires}
+		nameDomain := "certificate"
+		if len(domains) > 0 {
+			nameDomain = domains[0]
+		}
+		c := store.Cert{ID: s.NextID(), Name: autoCertName(nameDomain), Type: "custom", Domains: domains, ExpiresAt: expires}
 		if err := certs.WriteFiles(c.ID, []byte(in.Cert), []byte(in.Key)); err != nil {
 			return err
 		}
@@ -730,9 +930,6 @@ type acmeRequest struct {
 }
 
 func checkACMERequest(in *acmeRequest) error {
-	if in.Name == "" {
-		return fmt.Errorf("name required")
-	}
 	if err := checkDomains(in.Domains); err != nil {
 		return err
 	}
@@ -749,7 +946,7 @@ func checkACMERequest(in *acmeRequest) error {
 
 func (a *API) createACMECert(w http.ResponseWriter, r *http.Request) {
 	var in acmeRequest
-	if err := decode(r, &in); err != nil || in.Name == "" {
+	if err := decode(r, &in); err != nil {
 		fail(w, 400, "bad request")
 		return
 	}
@@ -759,7 +956,7 @@ func (a *API) createACMECert(w http.ResponseWriter, r *http.Request) {
 	}
 	a.mutate(w, r, func(s *store.State) error {
 		c := store.Cert{
-			ID: s.NextID(), Name: in.Name, Type: "acme", Domains: in.Domains,
+			ID: s.NextID(), Name: autoCertName(in.Domains[0]), Type: "acme", Domains: in.Domains,
 			Challenge: in.Challenge, DNSProvider: in.DNSProvider, DNSEnv: in.DNSEnv,
 		}
 		// issue synchronously — the client sees the ACME error directly
@@ -800,7 +997,7 @@ func (a *API) createIsolatedACMECerts(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, domain := range in.Domains {
 			c := store.Cert{
-				ID: s.NextID(), Name: fmt.Sprintf("%s [%s]", in.Name, domain),
+				ID: s.NextID(), Name: autoCertName(domain),
 				Type: "acme", Domains: []string{domain}, Challenge: in.Challenge,
 				DNSProvider: in.DNSProvider, DNSEnv: in.DNSEnv,
 			}
@@ -898,6 +1095,57 @@ func safeFilename(s string) string {
 	}, s)
 }
 
+func certUsage(s *store.State, id int) string {
+	for _, h := range s.Hosts {
+		if !h.IsolateCerts && h.CertID == id {
+			return fmt.Sprintf("host %d (%s)", h.ID, strings.Join(h.Domains, " "))
+		}
+		if h.IsolateCerts {
+			for domain, certID := range h.DomainCerts {
+				if certID == id {
+					return fmt.Sprintf("host %d (%s)", h.ID, domain)
+				}
+			}
+		}
+	}
+	for _, d := range s.MailDomains {
+		if d.CertID == id {
+			return "mail domain " + d.Domain
+		}
+	}
+	return ""
+}
+
+type certCleanupItem struct {
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func (a *API) cleanupExpiredCerts(w http.ResponseWriter, r *http.Request) {
+	a.mutateResult(w, r, func(s *store.State) (any, error) {
+		now := time.Now()
+		kept := make([]store.Cert, 0, len(s.Certs))
+		removed := []certCleanupItem{}
+		skipped := []certCleanupItem{}
+		for _, cert := range s.Certs {
+			if cert.ExpiresAt.IsZero() || cert.ExpiresAt.After(now) {
+				kept = append(kept, cert)
+				continue
+			}
+			if usage := certUsage(s, cert.ID); usage != "" {
+				skipped = append(skipped, certCleanupItem{ID: cert.ID, Name: cert.Name, Reason: "in use by " + usage})
+				kept = append(kept, cert)
+				continue
+			}
+			removed = append(removed, certCleanupItem{ID: cert.ID, Name: cert.Name})
+			certs.RemoveFiles(cert.ID)
+		}
+		s.Certs = kept
+		return map[string]any{"removed": removed, "skipped": skipped}, nil
+	})
+}
+
 func (a *API) deleteCert(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
@@ -905,22 +1153,8 @@ func (a *API) deleteCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mutate(w, r, func(s *store.State) error {
-		for _, h := range s.Hosts {
-			if !h.IsolateCerts && h.CertID == id {
-				return fmt.Errorf("cert in use by host %d (%s)", h.ID, strings.Join(h.Domains, " "))
-			}
-			if h.IsolateCerts {
-				for domain, certID := range h.DomainCerts {
-					if certID == id {
-						return fmt.Errorf("cert in use by host %d (%s)", h.ID, domain)
-					}
-				}
-			}
-		}
-		for _, d := range s.MailDomains {
-			if d.CertID == id {
-				return fmt.Errorf("cert in use by mail domain %s", d.Domain)
-			}
+		if usage := certUsage(s, id); usage != "" {
+			return fmt.Errorf("cert in use by %s", usage)
 		}
 		for i := range s.Certs {
 			if s.Certs[i].ID == id {
@@ -1019,8 +1253,15 @@ func checkMailDomain(s *store.State, d *store.MailDomain) error {
 			return fmt.Errorf("mail domain %q already exists", d.Domain)
 		}
 	}
-	if s.CertByID(d.CertID) == nil {
+	c := s.CertByID(d.CertID)
+	if c == nil {
 		return fmt.Errorf("certificate required (cert %d not found)", d.CertID)
+	}
+	if !certIsCurrent(c) {
+		return fmt.Errorf("cert %d is expired", d.CertID)
+	}
+	if !certCoversDomain(c, d.Domain) {
+		return fmt.Errorf("cert %d does not cover mail domain %q", d.CertID, d.Domain)
 	}
 	return nil
 }

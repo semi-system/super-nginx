@@ -23,6 +23,9 @@ export type Host = {
   upstream_scheme: 'http' | 'https'
   load_balance: 'round_robin' | 'least_conn' | 'ip_hash'
   upstreams: Upstream[]
+  health_check: boolean
+  health_check_path: string
+  health_check_timeout: number
   cert_id: number
   isolate_certs: boolean
   domain_certs: Record<string, number>
