@@ -3,6 +3,7 @@ package api
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morningstar-sudo/super-nginx/internal/store"
 )
@@ -29,5 +30,27 @@ func TestCertUsage(t *testing.T) {
 		if (tt.want == "" && got != "") || (tt.want != "" && !strings.Contains(got, tt.want)) {
 			t.Errorf("certUsage(%d) = %q, want it to contain %q", tt.id, got, tt.want)
 		}
+	}
+}
+
+func TestCertCleanupCandidate(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name string
+		cert store.Cert
+		want bool
+	}{
+		{"valid acme", store.Cert{Type: "acme", ExpiresAt: now.Add(time.Hour)}, true},
+		{"expired acme", store.Cert{Type: "acme", ExpiresAt: now.Add(-time.Hour)}, true},
+		{"expired custom", store.Cert{Type: "custom", ExpiresAt: now.Add(-time.Hour)}, true},
+		{"valid custom", store.Cert{Type: "custom", ExpiresAt: now.Add(time.Hour)}, false},
+		{"custom without expiry", store.Cert{Type: "custom"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := certCleanupCandidate(tt.cert, now); got != tt.want {
+				t.Fatalf("certCleanupCandidate() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

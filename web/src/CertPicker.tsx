@@ -52,6 +52,7 @@ export default function CertPicker({
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [failedDomain, setFailedDomain] = useState<string | null>(null)
   const [domains, setDomains] = useState('')
   const [challenge, setChallenge] = useState<'http' | 'dns'>('http')
   const [provider, setProvider] = useState('')
@@ -75,12 +76,14 @@ export default function CertPicker({
     setDomains(d.join(' '))
     setChallenge(d.some((x) => x.startsWith('*.')) ? 'dns' : 'http')
     setErr(null)
+    setFailedDomain(null)
     setOpen(true)
   }
 
   const issue = async () => {
     setBusy(true)
     setErr(null)
+    setFailedDomain(null)
     try {
       const env: Record<string, string> = {}
       for (const line of dnsEnv.split('\n')) {
@@ -115,7 +118,10 @@ export default function CertPicker({
       }
       setOpen(false)
     } catch (e: any) {
-      setErr(e.message || String(e))
+      const message = e.message || String(e)
+      const domainMatch = message.match(/^ACME issue failed for domain "([^"]+)":\s*/)
+      setFailedDomain(domainMatch?.[1] ?? null)
+      setErr(domainMatch ? message.slice(domainMatch[0].length) : message)
     } finally {
       setBusy(false)
     }
@@ -180,7 +186,16 @@ export default function CertPicker({
             challenge. Set the ACME email in Settings first.
           </p>
           {isolate && <p className="hint">Issuing {defaultDomains.length} separate single-domain certificates.</p>}
-          {err && <p className="error">{err}</p>}
+          {err && (
+            <p className="error">
+              {failedDomain && (
+                <>
+                  Failed domain: <strong>{failedDomain}</strong>. The isolated certificate batch was rolled back.{' '}
+                </>
+              )}
+              {err}
+            </p>
+          )}
           {!isolate && (
             <Row label="Domains (space separated)">
               <input value={domains} onChange={(e) => setDomains(e.target.value)} />

@@ -82,19 +82,24 @@ export default function Certs() {
       await reload()
     })
 
-  const expiredCount = certs.filter(certIsExpired).length
+  const cleanupCandidateCount = certs.filter((cert) => certIsExpired(cert) || cert.type === 'acme').length
 
-  const cleanupExpired = () =>
+  const cleanupCerts = () =>
     run(async () => {
-      if (!confirm(`Delete expired certificates that are no longer in use? (${expiredCount} found)`)) return
+      if (
+        !confirm(
+          `Delete unused expired certificates and unused Let's Encrypt certificates? (${cleanupCandidateCount} candidates)`,
+        )
+      )
+        return
       const result = await post<{
         removed: { id: number; name: string }[]
         skipped: { id: number; name: string; reason: string }[]
-      }>('/api/v1/certs/cleanup-expired')
+      }>('/api/v1/certs/cleanup')
       const skipped = result.skipped.length
         ? ` Skipped ${result.skipped.length}: ${result.skipped.map((c) => `${c.name} (${c.reason})`).join(', ')}.`
         : ''
-      setNotice(`Removed ${result.removed.length} expired certificate(s).${skipped}`)
+      setNotice(`Removed ${result.removed.length} unused or expired certificate(s).${skipped}`)
       await reload()
     })
 
@@ -115,8 +120,8 @@ export default function Certs() {
         />
         <button onClick={() => { setMode('acme'); setError(null) }}>+ Let's Encrypt</button>
         <button onClick={() => { setMode('custom'); setError(null) }}>+ Upload custom</button>
-        <button type="button" disabled={busy || expiredCount === 0} onClick={cleanupExpired}>
-          Clean expired{expiredCount > 0 ? ` (${expiredCount})` : ''}
+        <button type="button" disabled={busy || cleanupCandidateCount === 0} onClick={cleanupCerts}>
+          Clean expired / unused ACME{cleanupCandidateCount > 0 ? ` (${cleanupCandidateCount})` : ''}
         </button>
       </div>
       <Err msg={error} />

@@ -533,7 +533,9 @@ func (a *API) Register(mux *http.ServeMux) {
 	auth("POST /api/v1/certs/custom", a.createCustomCert)
 	auth("POST /api/v1/certs/acme", a.createACMECert)
 	auth("POST /api/v1/certs/acme/isolated", a.createIsolatedACMECerts)
-	auth("POST /api/v1/certs/cleanup-expired", a.cleanupExpiredCerts)
+	auth("POST /api/v1/certs/cleanup", a.cleanupCerts)
+	// Kept as an alias for clients using the first cleanup endpoint name.
+	auth("POST /api/v1/certs/cleanup-expired", a.cleanupCerts)
 	auth("POST /api/v1/certs/{id}/renew", a.renewCert)
 	auth("GET /api/v1/certs/{id}/download", a.downloadCert)
 	auth("DELETE /api/v1/certs/{id}", a.deleteCert)
@@ -1024,7 +1026,7 @@ func (a *API) createIsolatedACMECerts(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := certs.Issue(&c, s.Settings); err != nil {
 				cleanup(c.ID)
-				return nil, fmt.Errorf("ACME issue for %s failed: %w", domain, err)
+				return nil, fmt.Errorf("ACME issue failed for domain %q: %w", domain, err)
 			}
 			created = append(created, c)
 			ids[domain] = c.ID
@@ -1143,14 +1145,22 @@ type certCleanupItem struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-func (a *API) cleanupExpiredCerts(w http.ResponseWriter, r *http.Request) {
+func certCleanupCandidate(cert store.Cert, now time.Time) bool {
+	expired := !cert.ExpiresAt.IsZero() && !cert.ExpiresAt.After(now)
+	return expired || cert.Type == "acme"
+}
+
+// cleanupCerts removes unused expired certificates of any type and unused ACME
+// certificates even when they are still valid. Valid custom certificates are
+// retained because an upload may intentionally be staged for later use.
+func (a *API) cleanupCerts(w http.ResponseWriter, r *http.Request) {
 	a.mutateResult(w, r, func(s *store.State) (any, error) {
 		now := time.Now()
 		kept := make([]store.Cert, 0, len(s.Certs))
 		removed := []certCleanupItem{}
 		skipped := []certCleanupItem{}
 		for _, cert := range s.Certs {
-			if cert.ExpiresAt.IsZero() || cert.ExpiresAt.After(now) {
+			if !certCleanupCandidate(cert, now) {
 				kept = append(kept, cert)
 				continue
 			}
