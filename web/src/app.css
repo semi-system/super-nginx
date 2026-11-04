@@ -80,6 +80,26 @@
 }
 .bar h2, .bar h3 { flex: 1; margin: 0; }
 
+/* Search plus structured filters. auto-fit keeps the controls aligned on wide
+   screens and wraps them into full-width rows on narrow layouts. */
+.filter-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: var(--space-2);
+  align-items: center;
+  margin: 0 0 var(--space-4);
+}
+.filter-bar > input { grid-column: span 2; }
+.filter-bar > input,
+.filter-bar > select,
+.filter-bar > button { min-height: 42px; margin: 0; }
+.filter-bar > button { width: 100%; }
+
+@media (max-width: 640px) {
+  .filter-bar { grid-template-columns: 1fr; }
+  .filter-bar > input { grid-column: span 1; }
+}
+
 /* ---- Cards ----------------------------------------------------------- */
 /* .editor = a card body (forms inside modals and panels) */
 .editor {
@@ -196,6 +216,45 @@ td button { padding: 0.3rem 0.65rem; font-size: var(--fs-sm); }
 .ok    { color: var(--color-success); }
 .warn  { color: var(--color-warning); }
 .hint  { color: var(--text-muted); font-size: var(--fs-sm); }
+
+/* Compact, consistent backend-health badges. Buttons remain clickable so a
+   status can be refreshed without inheriting the large default button style. */
+.health-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  min-height: 28px;
+  padding: 0.2rem 0.55rem;
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  line-height: 1.2;
+  white-space: nowrap;
+  background: var(--bg-muted);
+}
+.health-status.neutral { color: var(--text-muted); }
+.health-status.ok {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+}
+.health-status.error {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+}
+button:not(.btn).health-status {
+  min-width: 92px;
+  min-height: 28px;
+  padding: 0.2rem 0.55rem;
+  border-color: transparent;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  line-height: 1.2;
+}
+button:not(.btn).health-status:hover {
+  border-color: currentColor;
+  background: var(--bg-muted);
+}
 
 /* ---- Login ----------------------------------------------------------- */
 .login { display: flex; justify-content: center; padding-top: 10vh; }

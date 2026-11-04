@@ -78,12 +78,15 @@ export default function Hosts() {
   const [healthBusy, setHealthBusy] = useState<Record<number, boolean>>({})
   const [healthError, setHealthError] = useState<Record<number, string>>({})
   const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('all')
+  const [stateFilter, setStateFilter] = useState('all')
+  const [sslFilter, setSSLFilter] = useState('all')
+  const [healthFilter, setHealthFilter] = useState('all')
   const { error, busy, run } = useAsync()
   const filteredHosts = useMemo(() => {
     const query = search.trim().toLowerCase()
-    if (!query) return hosts
-    return hosts.filter((host) =>
-      [
+    return hosts.filter((host) => {
+      const textMatches = [
         host.domains.join(' '),
         host.type,
         host.target,
@@ -93,9 +96,31 @@ export default function Hosts() {
       ]
         .join(' ')
         .toLowerCase()
-        .includes(query),
-    )
-  }, [hosts, search])
+        .includes(query)
+      if (!textMatches || (typeFilter !== 'all' && host.type !== typeFilter)) return false
+      if (stateFilter === 'enabled' && !host.enabled) return false
+      if (stateFilter === 'disabled' && host.enabled) return false
+
+      const sslMode = host.isolate_certs ? 'isolated' : host.cert_id ? 'shared' : 'none'
+      if (sslFilter !== 'all' && sslMode !== sslFilter) return false
+
+      if (healthFilter !== 'all') {
+        const results = health[host.id]
+        const isLoadBalancer = host.type === 'load_balancer'
+        const isHealthy = isLoadBalancer && !!results?.length && results.every((backend) => backend.healthy)
+        const isUnhealthy =
+          isLoadBalancer && (!!healthError[host.id] || (!!results?.length && results.some((backend) => !backend.healthy)))
+        const isOff = isLoadBalancer && !host.health_check
+        const isPending =
+          isLoadBalancer && host.health_check && !healthError[host.id] && !results?.length && !healthBusy[host.id]
+        if (healthFilter === 'healthy' && !isHealthy) return false
+        if (healthFilter === 'unhealthy' && !isUnhealthy) return false
+        if (healthFilter === 'off' && !isOff) return false
+        if (healthFilter === 'pending' && !isPending) return false
+      }
+      return true
+    })
+  }, [hosts, search, typeFilter, stateFilter, sslFilter, healthFilter, health, healthError, healthBusy])
   const paged = usePaged(filteredHosts)
 
   const checkHealth = useCallback(async (host: Host) => {
@@ -164,18 +189,86 @@ export default function Hosts() {
     <section>
       <div className="bar">
         <h2>Hosts</h2>
+        <button onClick={() => openHost(empty)}>+ Add host</button>
+      </div>
+      <div className="filter-bar" aria-label="Host filters">
         <input
           type="search"
           aria-label="Search hosts"
-          placeholder="Search domain, type, targetâ€¦"
-          style={{ width: 280 }}
+          placeholder="Domain, target, backend..."
           value={search}
           onChange={(e) => {
             setSearch(e.target.value)
             paged.setPage(1)
           }}
         />
-        <button onClick={() => openHost(empty)}>+ Add host</button>
+        <select
+          aria-label="Filter hosts by type"
+          value={typeFilter}
+          onChange={(e) => {
+            setTypeFilter(e.target.value)
+            paged.setPage(1)
+          }}
+        >
+          <option value="all">All types</option>
+          <option value="proxy">Proxy</option>
+          <option value="load_balancer">Load balancer</option>
+          <option value="redirect">Redirect</option>
+          <option value="static">Static</option>
+        </select>
+        <select
+          aria-label="Filter hosts by state"
+          value={stateFilter}
+          onChange={(e) => {
+            setStateFilter(e.target.value)
+            paged.setPage(1)
+          }}
+        >
+          <option value="all">All states</option>
+          <option value="enabled">Enabled</option>
+          <option value="disabled">Disabled</option>
+        </select>
+        <select
+          aria-label="Filter hosts by SSL mode"
+          value={sslFilter}
+          onChange={(e) => {
+            setSSLFilter(e.target.value)
+            paged.setPage(1)
+          }}
+        >
+          <option value="all">All SSL modes</option>
+          <option value="isolated">Isolated</option>
+          <option value="shared">Shared cert</option>
+          <option value="none">No certificate</option>
+        </select>
+        <select
+          aria-label="Filter hosts by health"
+          value={healthFilter}
+          onChange={(e) => {
+            setHealthFilter(e.target.value)
+            paged.setPage(1)
+          }}
+        >
+          <option value="all">All health states</option>
+          <option value="healthy">Healthy</option>
+          <option value="unhealthy">Unhealthy</option>
+          <option value="pending">Waiting for check</option>
+          <option value="off">Health check off</option>
+        </select>
+        <button
+          type="button"
+          disabled={!search && typeFilter === 'all' && stateFilter === 'all' && sslFilter === 'all' && healthFilter === 'all'}
+          onClick={() => {
+            setSearch('')
+            setTypeFilter('all')
+            setStateFilter('all')
+            setSSLFilter('all')
+            setHealthFilter('all')
+            paged.setPage(1)
+          }}
+        >
+          Clear
+        </button>
       </div>
       <Err msg={error} />
       <table>
@@ -199,17 +292,22 @@ export default function Hosts() {
               <td>{h.type === 'load_balancer' ? `${h.upstreams?.length ?? 0} backends` : h.target}</td>
               <td>
                 {h.type !== 'load_balancer' ? (
-                  'â€”'
+                  <span className="health-status neutral">{'\u2014'}</span>
                 ) : !h.health_check ? (
-                  <span className="hint">off</span>
+                  <span className="health-status neutral">off</span>
                 ) : healthError[h.id] ? (
-                  <button type="button" className="error" title={healthError[h.id]} onClick={() => checkHealth(h)}>
+                  <button
+                    type="button"
+                    className="health-status error"
+                    title={healthError[h.id]}
+                    onClick={() => checkHealth(h)}
+                  >
                     check failed
                   </button>
                 ) : health[h.id] ? (
                   <button
                     type="button"
-                    className={health[h.id].every((backend) => backend.healthy) ? 'ok' : 'error'}
+                    className={`health-status ${health[h.id].every((backend) => backend.healthy) ? 'ok' : 'error'}`}
                     title={health[h.id]
                       .map((backend) => `${backend.address}: ${backend.healthy ? `${backend.status_code} in ${backend.latency_ms}ms` : backend.error}`)
                       .join('\n')}
@@ -218,8 +316,13 @@ export default function Hosts() {
                     {health[h.id].filter((backend) => backend.healthy).length}/{health[h.id].length} healthy
                   </button>
                 ) : (
-                  <button type="button" disabled={healthBusy[h.id]} onClick={() => checkHealth(h)}>
-                    {healthBusy[h.id] ? 'checkingâ€¦' : 'check'}
+                  <button
+                    type="button"
+                    className="health-status neutral"
+                    disabled={healthBusy[h.id]}
+                    onClick={() => checkHealth(h)}
+                  >
+                    {healthBusy[h.id] ? 'checking...' : 'check'}
                   </button>
                 )}
               </td>

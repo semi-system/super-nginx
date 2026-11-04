@@ -8,22 +8,37 @@ function certIsExpired(cert: Cert) {
   return Number.isFinite(expires) && expires <= Date.now()
 }
 
+function certIsExpiring(cert: Cert) {
+  const expires = Date.parse(cert.expires_at)
+  const thirtyDays = 30 * 24 * 60 * 60 * 1000
+  return Number.isFinite(expires) && expires > Date.now() && expires <= Date.now() + thirtyDays
+}
+
 export default function Certs() {
   const [certs, setCerts] = useState<Cert[]>([])
   const [mode, setMode] = useState<'none' | 'custom' | 'acme'>('none')
   const [notice, setNotice] = useState('')
   const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('all')
+  const [challengeFilter, setChallengeFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
   const { error, busy, run, setError } = useAsync()
   const filteredCerts = useMemo(() => {
     const query = search.trim().toLowerCase()
-    if (!query) return certs
-    return certs.filter((cert) =>
-      [cert.name, cert.type, cert.challenge ?? '', cert.domains.join(' '), cert.last_error ?? 'ok']
+    return certs.filter((cert) => {
+      const textMatches = [cert.name, cert.type, cert.challenge ?? '', cert.domains.join(' '), cert.last_error ?? 'ok']
         .join(' ')
         .toLowerCase()
-        .includes(query),
-    )
-  }, [certs, search])
+        .includes(query)
+      if (!textMatches || (typeFilter !== 'all' && cert.type !== typeFilter)) return false
+      if (challengeFilter !== 'all' && cert.challenge !== challengeFilter) return false
+      if (statusFilter === 'valid' && (cert.last_error || certIsExpired(cert) || certIsExpiring(cert))) return false
+      if (statusFilter === 'expiring' && (cert.last_error || !certIsExpiring(cert))) return false
+      if (statusFilter === 'expired' && !certIsExpired(cert)) return false
+      if (statusFilter === 'error' && !cert.last_error) return false
+      return true
+    })
+  }, [certs, search, typeFilter, challengeFilter, statusFilter])
   const paged = usePaged(filteredCerts)
 
   // custom form
@@ -107,21 +122,73 @@ export default function Certs() {
     <section>
       <div className="bar">
         <h2>Certificates</h2>
+        <button onClick={() => { setMode('acme'); setError(null) }}>+ Let's Encrypt</button>
+        <button onClick={() => { setMode('custom'); setError(null) }}>+ Upload custom</button>
+        <button type="button" disabled={busy || cleanupCandidateCount === 0} onClick={cleanupCerts}>
+          Clean expired / unused ACME{cleanupCandidateCount > 0 ? ` (${cleanupCandidateCount})` : ''}
+        </button>
+      </div>
+      <div className="filter-bar" aria-label="Certificate filters">
         <input
           type="search"
           aria-label="Search certificates"
-          placeholder="Search name, SAN, typeâ€¦"
-          style={{ width: 280 }}
+          placeholder="Name or SAN..."
           value={search}
           onChange={(e) => {
             setSearch(e.target.value)
             paged.setPage(1)
           }}
         />
-        <button onClick={() => { setMode('acme'); setError(null) }}>+ Let's Encrypt</button>
-        <button onClick={() => { setMode('custom'); setError(null) }}>+ Upload custom</button>
-        <button type="button" disabled={busy || cleanupCandidateCount === 0} onClick={cleanupCerts}>
-          Clean expired / unused ACME{cleanupCandidateCount > 0 ? ` (${cleanupCandidateCount})` : ''}
+        <select
+          aria-label="Filter certificates by type"
+          value={typeFilter}
+          onChange={(e) => {
+            setTypeFilter(e.target.value)
+            paged.setPage(1)
+          }}
+        >
+          <option value="all">All types</option>
+          <option value="acme">Let's Encrypt / ACME</option>
+          <option value="custom">Custom</option>
+        </select>
+        <select
+          aria-label="Filter certificates by challenge"
+          value={challengeFilter}
+          onChange={(e) => {
+            setChallengeFilter(e.target.value)
+            paged.setPage(1)
+          }}
+        >
+          <option value="all">All challenges</option>
+          <option value="http">HTTP-01</option>
+          <option value="dns">DNS-01</option>
+        </select>
+        <select
+          aria-label="Filter certificates by status"
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value)
+            paged.setPage(1)
+          }}
+        >
+          <option value="all">All statuses</option>
+          <option value="valid">Valid over 30 days</option>
+          <option value="expiring">Expiring within 30 days</option>
+          <option value="expired">Expired</option>
+          <option value="error">Has error</option>
+        </select>
+        <button
+          type="button"
+          disabled={!search && typeFilter === 'all' && challengeFilter === 'all' && statusFilter === 'all'}
+          onClick={() => {
+            setSearch('')
+            setTypeFilter('all')
+            setChallengeFilter('all')
+            setStatusFilter('all')
+            paged.setPage(1)
+          }}
+        >
+          Clear
         </button>
       </div>
       <Err msg={error} />
