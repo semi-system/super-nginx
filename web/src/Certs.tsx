@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { createMemo, createSignal, onMount } from 'solid-js'
 import { get, post, del, Cert } from './api'
 import { Err, Row, Modal, Pagination, useAsync, usePaged } from './ui'
 import { dnsProviders } from './dnsProviders'
+import DomainInput from './DomainInput'
 
 function certIsExpired(cert: Cert) {
   const expires = Date.parse(cert.expires_at)
@@ -15,51 +16,51 @@ function certIsExpiring(cert: Cert) {
 }
 
 export default function Certs() {
-  const [certs, setCerts] = useState<Cert[]>([])
-  const [mode, setMode] = useState<'none' | 'custom' | 'acme'>('none')
-  const [notice, setNotice] = useState('')
-  const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState('all')
-  const [challengeFilter, setChallengeFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [certs, setCerts] = createSignal<Cert[]>([])
+  const [mode, setMode] = createSignal<'none' | 'custom' | 'acme'>('none')
+  const [notice, setNotice] = createSignal('')
+  const [search, setSearch] = createSignal('')
+  const [typeFilter, setTypeFilter] = createSignal('all')
+  const [challengeFilter, setChallengeFilter] = createSignal('all')
+  const [statusFilter, setStatusFilter] = createSignal('all')
   const { error, busy, run, setError } = useAsync()
-  const filteredCerts = useMemo(() => {
-    const query = search.trim().toLowerCase()
-    return certs.filter((cert) => {
+  const filteredCerts = createMemo(() => {
+    const query = search().trim().toLowerCase()
+    return certs().filter((cert) => {
       const textMatches = [cert.name, cert.type, cert.challenge ?? '', cert.domains.join(' '), cert.last_error ?? 'ok']
         .join(' ')
         .toLowerCase()
         .includes(query)
-      if (!textMatches || (typeFilter !== 'all' && cert.type !== typeFilter)) return false
-      if (challengeFilter !== 'all' && cert.challenge !== challengeFilter) return false
-      if (statusFilter === 'valid' && (cert.last_error || certIsExpired(cert) || certIsExpiring(cert))) return false
-      if (statusFilter === 'expiring' && (cert.last_error || !certIsExpiring(cert))) return false
-      if (statusFilter === 'expired' && !certIsExpired(cert)) return false
-      if (statusFilter === 'error' && !cert.last_error) return false
+      if (!textMatches || (typeFilter() !== 'all' && cert.type !== typeFilter())) return false
+      if (challengeFilter() !== 'all' && cert.challenge !== challengeFilter()) return false
+      if (statusFilter() === 'valid' && (cert.last_error || certIsExpired(cert) || certIsExpiring(cert))) return false
+      if (statusFilter() === 'expiring' && (cert.last_error || !certIsExpiring(cert))) return false
+      if (statusFilter() === 'expired' && !certIsExpired(cert)) return false
+      if (statusFilter() === 'error' && !cert.last_error) return false
       return true
     })
-  }, [certs, search, typeFilter, challengeFilter, statusFilter])
+  })
   const paged = usePaged(filteredCerts)
 
   // custom form
-  const [certPEM, setCertPEM] = useState('')
-  const [keyPEM, setKeyPEM] = useState('')
+  const [certPEM, setCertPEM] = createSignal('')
+  const [keyPEM, setKeyPEM] = createSignal('')
   // acme form
-  const [domains, setDomains] = useState('')
-  const [challenge, setChallenge] = useState<'http' | 'dns'>('http')
-  const [provider, setProvider] = useState('')
-  const [dnsEnv, setDnsEnv] = useState('')
+  const [domains, setDomains] = createSignal<string[]>([])
+  const [challenge, setChallenge] = createSignal<'http' | 'dns'>('http')
+  const [provider, setProvider] = createSignal('')
+  const [dnsEnv, setDnsEnv] = createSignal('')
 
-  const providerEnv = dnsProviders.find((p) => p.code === provider)?.env ?? []
+  const providerEnv = createMemo(() => dnsProviders.find((p) => p.code === provider())?.env ?? [])
 
   const reload = async () => setCerts((await get('/api/v1/certs')) ?? [])
-  useEffect(() => {
+  onMount(() => {
     run(reload)
-  }, [])
+  })
 
   const submitCustom = () =>
     run(async () => {
-      await post('/api/v1/certs/custom', { cert: certPEM, key: keyPEM })
+      await post('/api/v1/certs/custom', { cert: certPEM(), key: keyPEM() })
       setMode('none')
       setCertPEM('')
       setKeyPEM('')
@@ -69,18 +70,18 @@ export default function Certs() {
   const submitACME = () =>
     run(async () => {
       const env: Record<string, string> = {}
-      for (const line of dnsEnv.split('\n')) {
+      for (const line of dnsEnv().split('\n')) {
         const i = line.indexOf('=')
         if (i > 0) env[line.slice(0, i).trim()] = line.slice(i + 1).trim()
       }
       await post('/api/v1/certs/acme', {
-        domains: domains.split(/[\s,]+/).filter(Boolean),
-        challenge,
-        dns_provider: provider,
+        domains: domains(),
+        challenge: challenge(),
+        dns_provider: provider(),
         dns_env: env,
       })
       setMode('none')
-      setDomains('')
+      setDomains([])
       await reload()
     })
 
@@ -97,13 +98,13 @@ export default function Certs() {
       await reload()
     })
 
-  const cleanupCandidateCount = certs.filter((cert) => certIsExpired(cert) || cert.type === 'acme').length
+  const cleanupCandidateCount = createMemo(() => certs().filter((cert) => certIsExpired(cert) || cert.type === 'acme').length)
 
   const cleanupCerts = () =>
     run(async () => {
       if (
         !confirm(
-          `Delete unused expired certificates and unused Let's Encrypt certificates? (${cleanupCandidateCount} candidates)`,
+          `Delete unused expired certificates and unused Let's Encrypt certificates? (${cleanupCandidateCount()} candidates)`,
         )
       )
         return
@@ -120,30 +121,30 @@ export default function Certs() {
 
   return (
     <section>
-      <div className="bar">
+      <div class="bar">
         <h2>Certificates</h2>
         <button onClick={() => { setMode('acme'); setError(null) }}>+ Let's Encrypt</button>
         <button onClick={() => { setMode('custom'); setError(null) }}>+ Upload custom</button>
-        <button type="button" disabled={busy || cleanupCandidateCount === 0} onClick={cleanupCerts}>
-          Clean expired / unused ACME{cleanupCandidateCount > 0 ? ` (${cleanupCandidateCount})` : ''}
+        <button type="button" disabled={busy() || cleanupCandidateCount() === 0} onClick={cleanupCerts}>
+          Clean expired / unused ACME{cleanupCandidateCount() > 0 ? ` (${cleanupCandidateCount()})` : ''}
         </button>
       </div>
-      <div className="filter-bar" aria-label="Certificate filters">
+      <div class="filter-bar" aria-label="Certificate filters">
         <input
           type="search"
           aria-label="Search certificates"
           placeholder="Name or SAN..."
-          value={search}
+          value={search()}
           onChange={(e) => {
-            setSearch(e.target.value)
+            setSearch(e.currentTarget.value)
             paged.setPage(1)
           }}
         />
         <select
           aria-label="Filter certificates by type"
-          value={typeFilter}
+          value={typeFilter()}
           onChange={(e) => {
-            setTypeFilter(e.target.value)
+            setTypeFilter(e.currentTarget.value)
             paged.setPage(1)
           }}
         >
@@ -153,9 +154,9 @@ export default function Certs() {
         </select>
         <select
           aria-label="Filter certificates by challenge"
-          value={challengeFilter}
+          value={challengeFilter()}
           onChange={(e) => {
-            setChallengeFilter(e.target.value)
+            setChallengeFilter(e.currentTarget.value)
             paged.setPage(1)
           }}
         >
@@ -165,9 +166,9 @@ export default function Certs() {
         </select>
         <select
           aria-label="Filter certificates by status"
-          value={statusFilter}
+          value={statusFilter()}
           onChange={(e) => {
-            setStatusFilter(e.target.value)
+            setStatusFilter(e.currentTarget.value)
             paged.setPage(1)
           }}
         >
@@ -179,7 +180,7 @@ export default function Certs() {
         </select>
         <button
           type="button"
-          disabled={!search && typeFilter === 'all' && challengeFilter === 'all' && statusFilter === 'all'}
+          disabled={!search() && typeFilter() === 'all' && challengeFilter() === 'all' && statusFilter() === 'all'}
           onClick={() => {
             setSearch('')
             setTypeFilter('all')
@@ -191,8 +192,8 @@ export default function Certs() {
           Clear
         </button>
       </div>
-      <Err msg={error} />
-      {notice && <p className="ok">{notice}</p>}
+      <Err msg={error()} />
+      {notice() && <p class="alert alert-success">{notice()}</p>}
       <table>
         <thead>
           <tr>
@@ -205,18 +206,18 @@ export default function Certs() {
           </tr>
         </thead>
         <tbody>
-          {paged.rows.map((c) => (
-            <tr key={c.id}>
+          {paged.rows().map((c) => (
+            <tr>
               <td>{c.name}</td>
               <td>{c.type === 'acme' ? `acme/${c.challenge}` : 'custom'}</td>
               <td>{c.domains.join(', ')}</td>
               <td>{c.expires_at ? new Date(c.expires_at).toLocaleDateString() : '—'}</td>
-              <td className={certIsExpired(c) || c.last_error ? 'error' : ''}>
+              <td class={certIsExpired(c) || c.last_error ? 'error' : ''}>
                 {certIsExpired(c) ? 'expired' : c.last_error || 'ok'}
               </td>
               <td>
                 {c.type === 'acme' && (
-                  <button disabled={busy} onClick={() => renew(c.id)}>
+                  <button disabled={busy()} onClick={() => renew(c.id)}>
                     Renew
                   </button>
                 )}{' '}
@@ -231,48 +232,48 @@ export default function Certs() {
       </table>
       <Pagination {...paged} />
 
-      {mode === 'custom' && (
+      {mode() === 'custom' && (
         <Modal onClose={() => setMode('none')}>
-        <form className="editor" onSubmit={(e) => { e.preventDefault(); submitCustom() }}>
+        <form class="editor" onSubmit={(e) => { e.preventDefault(); submitCustom() }}>
           <h3>Upload certificate</h3>
           <Row label="Certificate (fullchain PEM)">
-            <textarea rows={6} value={certPEM} onChange={(e) => setCertPEM(e.target.value)} />
+            <textarea rows={6} value={certPEM()} onInput={(e) => setCertPEM(e.currentTarget.value)} />
           </Row>
           <Row label="Private key (PEM)">
-            <textarea rows={6} value={keyPEM} onChange={(e) => setKeyPEM(e.target.value)} />
+            <textarea rows={6} value={keyPEM()} onInput={(e) => setKeyPEM(e.currentTarget.value)} />
           </Row>
-          <div className="bar">
-            <button type="submit" disabled={busy}>Upload</button>
+          <div class="bar">
+            <button type="submit" disabled={busy()}>Upload</button>
             <button type="button" onClick={() => setMode('none')}>Cancel</button>
           </div>
         </form>
         </Modal>
       )}
 
-      {mode === 'acme' && (
+      {mode() === 'acme' && (
         <Modal onClose={() => setMode('none')}>
-        <form className="editor" onSubmit={(e) => { e.preventDefault(); submitACME() }}>
+        <form class="editor" onSubmit={(e) => { e.preventDefault(); submitACME() }}>
           <h3>Let's Encrypt certificate</h3>
-          <p className="hint">
+          <p class="hint">
             HTTP challenge needs port 80 → 8080 reachable from the internet. Wildcards need the DNS
             challenge. Set the ACME email in Settings first.
           </p>
-          <Row label="Domains (space separated)">
-            <input value={domains} onChange={(e) => setDomains(e.target.value)} placeholder="example.com *.example.com" />
+          <Row label="Domains">
+            <DomainInput value={domains()} onChange={setDomains} placeholder="example.com" />
           </Row>
           <Row label="Challenge">
-            <select value={challenge} onChange={(e) => setChallenge(e.target.value as 'http' | 'dns')}>
+            <select value={challenge()} onChange={(e) => setChallenge(e.currentTarget.value as 'http' | 'dns')}>
               <option value="http">HTTP-01</option>
               <option value="dns">DNS-01</option>
             </select>
           </Row>
-          {challenge === 'dns' && (
+          {challenge() === 'dns' && (
             <>
               <Row label="DNS provider">
-                <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+                <select value={provider()} onChange={(e) => setProvider(e.currentTarget.value)}>
                   <option value="">— select provider —</option>
                   {dnsProviders.map((p) => (
-                    <option key={p.code} value={p.code}>
+                    <option value={p.code}>
                       {p.name} ({p.code})
                     </option>
                   ))}
@@ -280,19 +281,19 @@ export default function Certs() {
               </Row>
               <Row label="Provider credentials (KEY=value per line — not every key is required, see lego docs)">
                 <textarea
-                  rows={Math.max(3, providerEnv.length)}
-                  value={dnsEnv}
-                  onChange={(e) => setDnsEnv(e.target.value)}
+                  rows={Math.max(3, providerEnv().length)}
+                  value={dnsEnv()}
+                  onInput={(e) => setDnsEnv(e.currentTarget.value)}
                   placeholder={
-                    providerEnv.length ? providerEnv.map((k) => k + '=').join('\n') : 'CLOUDFLARE_DNS_API_TOKEN=...'
+                    providerEnv().length ? providerEnv().map((k) => k + '=').join('\n') : 'CLOUDFLARE_DNS_API_TOKEN=...'
                   }
                 />
               </Row>
             </>
           )}
-          <div className="bar">
-            <button type="submit" disabled={busy}>
-              {busy ? 'Issuing…' : 'Issue certificate'}
+          <div class="bar">
+            <button type="submit" disabled={busy()}>
+              {busy() ? 'Issuing…' : 'Issue certificate'}
             </button>
             <button type="button" onClick={() => setMode('none')}>Cancel</button>
           </div>

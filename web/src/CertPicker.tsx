@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
-import { get, post, Cert } from './api'
+import { createEffect, createMemo, createSignal } from 'solid-js'
+import { Cert, get, post } from './api'
+import { dnsProviders } from './dnsProviders'
+import DomainInput from './DomainInput'
 import { Check, Row } from './ui'
 
 function certDomainMatches(san: string, domain: string) {
@@ -13,30 +15,12 @@ function certDomainMatches(san: string, domain: string) {
   return label.length > 0 && !label.includes('.')
 }
 
-function certCoversDomain(cert: Cert, domain: string) {
-  return cert.domains.some((san) => certDomainMatches(san, domain))
-}
-
-function certIsCurrent(cert: Cert) {
+const certIsCurrent = (cert: Cert) => {
   const expires = Date.parse(cert.expires_at)
   return Number.isFinite(expires) && expires > Date.now()
 }
 
-// Certificate selector with inline Let's Encrypt issuance, so hosts and mail
-// domains don't have to bounce to the Certs tab. Reused in Hosts + Mail.
-export default function CertPicker({
-  value,
-  certs,
-  defaultDomains,
-  label = 'Certificate',
-  noneLabel = '— none —',
-  onChange,
-  onCertsChanged,
-  isolate = false,
-  domainCerts = {},
-  onIsolateChange,
-  onDomainCertsChange,
-}: {
+type Props = {
   value: number
   certs: Cert[]
   defaultDomains: string[]
@@ -48,192 +32,179 @@ export default function CertPicker({
   domainCerts?: Record<string, number>
   onIsolateChange?: (isolate: boolean) => void
   onDomainCertsChange?: (certs: Record<string, number>) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [failedDomain, setFailedDomain] = useState<string | null>(null)
-  const [domains, setDomains] = useState('')
-  const [challenge, setChallenge] = useState<'http' | 'dns'>('http')
-  const [provider, setProvider] = useState('')
-  const [dnsEnv, setDnsEnv] = useState('')
+}
 
-  const matchingCerts = certs.filter(
-    (cert) =>
-      certIsCurrent(cert) &&
-      defaultDomains.length > 0 &&
-      defaultDomains.every((domain) => certCoversDomain(cert, domain)),
+// Shared by HTTP hosts and mail domains. It combines selection and inline ACME
+// issuance so certificate picking has one interaction model everywhere.
+export default function CertPicker(props: Props) {
+  const [open, setOpen] = createSignal(false)
+  const [busy, setBusy] = createSignal(false)
+  const [error, setError] = createSignal<string | null>(null)
+  const [failedDomain, setFailedDomain] = createSignal<string | null>(null)
+  const [domains, setDomains] = createSignal<string[]>([])
+  const [challenge, setChallenge] = createSignal<'http' | 'dns'>('http')
+  const [provider, setProvider] = createSignal('')
+  const [dnsEnv, setDnsEnv] = createSignal('')
+
+  const isolate = () => props.isolate ?? false
+  const domainCerts = () => props.domainCerts ?? {}
+  const matchingCerts = createMemo(() =>
+    props.certs.filter(
+      (cert) =>
+        certIsCurrent(cert) &&
+        props.defaultDomains.length > 0 &&
+        props.defaultDomains.every((domain) => cert.domains.some((san) => certDomainMatches(san, domain))),
+    ),
   )
+  const providerEnv = createMemo(() => dnsProviders.find((item) => item.code === provider())?.env ?? [])
 
-  useEffect(() => {
-    if (!isolate && value !== 0 && !matchingCerts.some((cert) => cert.id === value)) {
-      onChange(0)
+  createEffect(() => {
+    if (!isolate() && props.value !== 0 && !matchingCerts().some((cert) => cert.id === props.value)) {
+      props.onChange(0)
     }
-  }, [isolate, value, certs, defaultDomains, onChange])
+  })
 
   const startIssue = () => {
-    const d = defaultDomains.filter(Boolean)
-    setDomains(d.join(' '))
-    setChallenge(d.some((x) => x.startsWith('*.')) ? 'dns' : 'http')
-    setErr(null)
+    const initialDomains = props.defaultDomains.filter(Boolean)
+    setDomains(initialDomains)
+    setChallenge(initialDomains.some((domain) => domain.startsWith('*.')) ? 'dns' : 'http')
+    setError(null)
     setFailedDomain(null)
     setOpen(true)
   }
 
   const issue = async () => {
     setBusy(true)
-    setErr(null)
+    setError(null)
     setFailedDomain(null)
     try {
       const env: Record<string, string> = {}
-      for (const line of dnsEnv.split('\n')) {
-        const i = line.indexOf('=')
-        if (i > 0) env[line.slice(0, i).trim()] = line.slice(i + 1).trim()
+      for (const line of dnsEnv().split('\n')) {
+        const separator = line.indexOf('=')
+        if (separator > 0) env[line.slice(0, separator).trim()] = line.slice(separator + 1).trim()
       }
-      const requestedDomains = isolate
-        ? defaultDomains.filter(Boolean)
-        : domains.split(/[\s,]+/).filter(Boolean)
+      const requestedDomains = isolate() ? props.defaultDomains.filter(Boolean) : domains()
       const body = {
         domains: requestedDomains,
-        challenge,
-        dns_provider: provider,
+        challenge: challenge(),
+        dns_provider: provider(),
         dns_env: env,
       }
-      let isolatedIDs: Record<string, number> | null = null
-      if (isolate) {
+
+      let isolatedIDs: Record<string, number> | undefined
+      if (isolate()) {
         const result = await post<{ cert_ids: Record<string, number> }>('/api/v1/certs/acme/isolated', body)
         isolatedIDs = result.cert_ids
       } else {
         await post('/api/v1/certs/acme', body)
       }
+
       const fresh: Cert[] = (await get('/api/v1/certs')) ?? []
-      onCertsChanged(fresh)
+      props.onCertsChanged(fresh)
       if (isolatedIDs) {
-        onDomainCertsChange?.(isolatedIDs)
+        props.onDomainCertsChange?.(isolatedIDs)
       } else {
-        // synchronous single-user issuance: the cert we just made has the max id
-        // ponytail: match by highest id instead of threading the id back through the API
-        const created = fresh.reduce((a, b) => (b.id > a.id ? b : a), fresh[0])
-        if (created) onChange(created.id)
+        const created = fresh.reduce<Cert | undefined>((latest, cert) => !latest || cert.id > latest.id ? cert : latest, undefined)
+        if (created) props.onChange(created.id)
       }
       setOpen(false)
-    } catch (e: any) {
-      const message = e.message || String(e)
+    } catch (cause: any) {
+      const message = cause?.message || String(cause)
       const domainMatch = message.match(/^ACME issue failed for domain "([^"]+)":\s*/)
       setFailedDomain(domainMatch?.[1] ?? null)
-      setErr(domainMatch ? message.slice(domainMatch[0].length) : message)
+      setError(domainMatch ? message.slice(domainMatch[0].length) : message)
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <>
-      {onIsolateChange && (
-        <div className="checks">
+    <div class="picker-stack">
+      {props.onIsolateChange && (
+        <div class="checks">
           <Check
-            label="Isolate certificates (issue one certificate per domain so sibling names are not exposed in SANs)"
-            checked={isolate}
-            onChange={onIsolateChange}
+            label="Isolate certificates (one certificate per domain)"
+            checked={isolate()}
+            onChange={props.onIsolateChange}
           />
         </div>
       )}
-      {(!isolate || !open) && (
-        <Row label={label}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {isolate ? (
-              <div style={{ flex: 1 }}>
-                {defaultDomains.length ? (
-                  defaultDomains.map((domain) => {
-                    const cert = certs.find(
-                      (c) =>
-                        c.id === domainCerts[domain] &&
-                        certIsCurrent(c) &&
-                        c.domains.length === 1 &&
-                        c.domains[0].toLowerCase() === domain.toLowerCase(),
-                    )
-                    return (
-                      <div key={domain} className="hint">
-                        {domain}: {cert ? cert.name : 'certificate not issued'}
-                      </div>
-                    )
-                  })
-                ) : (
-                  <span className="hint">Add host domains before issuing certificates.</span>
-                )}
+
+      {(!isolate() || !open()) && (
+        <Row label={props.label ?? 'Certificate'}>
+          <div class="picker-row">
+            {isolate() ? (
+              <div class="picker-summary">
+                {props.defaultDomains.length ? props.defaultDomains.map((domain) => {
+                  const cert = props.certs.find((item) =>
+                    item.id === domainCerts()[domain] &&
+                    certIsCurrent(item) &&
+                    item.domains.length === 1 &&
+                    item.domains[0].toLowerCase() === domain.toLowerCase(),
+                  )
+                  return <span class={cert ? 'picker-status ok' : 'picker-status warn'}>{domain}: {cert?.name ?? 'not issued'}</span>
+                }) : <span class="hint">Add host domains before issuing certificates.</span>}
               </div>
             ) : (
-              <select style={{ flex: 1 }} value={value} onChange={(e) => onChange(+e.target.value)}>
-                <option value={0}>{noneLabel}</option>
-                {matchingCerts.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.domains.join(', ')})
-                  </option>
+              <select class="picker-control" value={props.value} onChange={(event) => props.onChange(+event.currentTarget.value)}>
+                <option value={0}>{props.noneLabel ?? '— none —'}</option>
+                {matchingCerts().map((cert) => (
+                  <option value={cert.id}>{cert.name} ({cert.domains.join(', ')})</option>
                 ))}
               </select>
             )}
-            <button type="button" onClick={() => (open ? setOpen(false) : startIssue())}>
-              {open ? 'Cancel' : isolate ? '＋ Issue isolated certs' : "＋ Let's Encrypt"}
+            <button type="button" class="picker-action" onClick={() => open() ? setOpen(false) : startIssue()}>
+              {open() ? 'Cancel' : isolate() ? '+ Issue certificates' : "+ Let's Encrypt"}
             </button>
           </div>
         </Row>
       )}
 
-      {open && (
-        <div className="editor" style={{ margin: '4px 0 12px' }}>
-          <p className="hint">
-            HTTP challenge needs port 80 → 8080 reachable from the internet. Wildcards need the DNS
-            challenge. Set the ACME email in Settings first.
-          </p>
-          {isolate && <p className="hint">Issuing {defaultDomains.length} separate single-domain certificates.</p>}
-          {err && (
-            <p className="error">
-              {failedDomain && (
-                <>
-                  Failed domain: <strong>{failedDomain}</strong>. The isolated certificate batch was rolled back.{' '}
-                </>
-              )}
-              {err}
+      {open() && (
+        <div class="picker-panel">
+          <p class="hint">HTTP-01 needs public port 80. Wildcards require DNS-01. Configure the ACME email in Settings first.</p>
+          {isolate() && <p class="hint">This will issue {props.defaultDomains.length} separate single-domain certificates.</p>}
+          {error() && (
+            <p class="alert alert-danger">
+              {failedDomain() && <>Failed domain: <strong>{failedDomain()}</strong>. The batch was rolled back. </>}
+              {error()}
             </p>
           )}
-          {!isolate && (
-            <Row label="Domains (space separated)">
-              <input value={domains} onChange={(e) => setDomains(e.target.value)} />
-            </Row>
+          {!isolate() && (
+            <Row label="Domains"><DomainInput value={domains()} onChange={setDomains} /></Row>
           )}
           <Row label="Challenge">
-            <select value={challenge} onChange={(e) => setChallenge(e.target.value as 'http' | 'dns')}>
+            <select value={challenge()} onChange={(event) => setChallenge(event.currentTarget.value as 'http' | 'dns')}>
               <option value="http">HTTP-01</option>
               <option value="dns">DNS-01</option>
             </select>
           </Row>
-          {challenge === 'dns' && (
+          {challenge() === 'dns' && (
             <>
-              <Row label="DNS provider (lego name, e.g. cloudflare)">
-                <input value={provider} onChange={(e) => setProvider(e.target.value)} />
+              <Row label="DNS provider">
+                <select value={provider()} onChange={(event) => setProvider(event.currentTarget.value)}>
+                  <option value="">— select provider —</option>
+                  {dnsProviders.map((item) => <option value={item.code}>{item.name} ({item.code})</option>)}
+                </select>
               </Row>
-              <Row label="Provider credentials (KEY=value per line)">
+              <Row label="Provider credentials" hint="Use KEY=value, one entry per line.">
                 <textarea
-                  rows={3}
-                  value={dnsEnv}
-                  onChange={(e) => setDnsEnv(e.target.value)}
-                  placeholder="CLOUDFLARE_DNS_API_TOKEN=..."
+                  rows={Math.max(3, providerEnv().length)}
+                  value={dnsEnv()}
+                  onInput={(event) => setDnsEnv(event.currentTarget.value)}
+                  placeholder={providerEnv().length ? providerEnv().map((key) => `${key}=`).join('\n') : 'CLOUDFLARE_DNS_API_TOKEN=...'}
                 />
               </Row>
             </>
           )}
-          <div className="bar">
-            <button type="button" disabled={busy || (isolate && defaultDomains.length === 0)} onClick={issue}>
-              {busy ? 'Issuing…' : isolate ? `Issue ${defaultDomains.length} certificates` : 'Issue & attach'}
+          <div class="form-actions">
+            <button type="button" class="primary" disabled={busy() || (isolate() && props.defaultDomains.length === 0)} onClick={issue}>
+              {busy() ? 'Issuing…' : isolate() ? `Issue ${props.defaultDomains.length} certificates` : 'Issue & attach'}
             </button>
-            {isolate && (
-              <button type="button" disabled={busy} onClick={() => setOpen(false)}>
-                Cancel
-              </button>
-            )}
+            <button type="button" disabled={busy()} onClick={() => setOpen(false)}>Cancel</button>
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }

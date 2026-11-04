@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
+import { createMutable } from 'solid-js/store'
 import { get, post, put, del, Host, Cert } from './api'
 import { Err, Row, Check, Modal, Pagination, useAsync, usePaged } from './ui'
 import CertPicker from './CertPicker'
@@ -70,22 +71,32 @@ const empty: Host = {
 }
 
 export default function Hosts() {
-  const [hosts, setHosts] = useState<Host[]>([])
-  const [certs, setCerts] = useState<Cert[]>([])
-  const [acls, setAcls] = useState<AccessListOut[]>([])
-  const [edit, setEdit] = useState<Host | null>(null)
-  const [health, setHealth] = useState<Record<number, BackendHealth[]>>({})
-  const [healthBusy, setHealthBusy] = useState<Record<number, boolean>>({})
-  const [healthError, setHealthError] = useState<Record<number, string>>({})
-  const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState('all')
-  const [stateFilter, setStateFilter] = useState('all')
-  const [sslFilter, setSSLFilter] = useState('all')
-  const [healthFilter, setHealthFilter] = useState('all')
+  const [hosts, setHosts] = createSignal<Host[]>([])
+  const [certs, setCerts] = createSignal<Cert[]>([])
+  const [acls, setAcls] = createSignal<AccessListOut[]>([])
+  const edit = createMutable<Host>({ ...empty, upstreams: [...empty.upstreams], directives: [], domain_certs: {} })
+  const [editOpen, setEditOpen] = createSignal(false)
+  const setEdit = (next: Host | null | ((current: Host | null) => Host | null)) => {
+    const value = typeof next === 'function' ? next(editOpen() ? { ...edit } : null) : next
+    if (!value) {
+      setEditOpen(false)
+      return
+    }
+    Object.assign(edit, value)
+    setEditOpen(true)
+  }
+  const [health, setHealth] = createSignal<Record<number, BackendHealth[]>>({})
+  const [healthBusy, setHealthBusy] = createSignal<Record<number, boolean>>({})
+  const [healthError, setHealthError] = createSignal<Record<number, string>>({})
+  const [search, setSearch] = createSignal('')
+  const [typeFilter, setTypeFilter] = createSignal('all')
+  const [stateFilter, setStateFilter] = createSignal('all')
+  const [sslFilter, setSSLFilter] = createSignal('all')
+  const [healthFilter, setHealthFilter] = createSignal('all')
   const { error, busy, run } = useAsync()
-  const filteredHosts = useMemo(() => {
-    const query = search.trim().toLowerCase()
-    return hosts.filter((host) => {
+  const filteredHosts = createMemo(() => {
+    const query = search().trim().toLowerCase()
+    return hosts().filter((host) => {
       const textMatches = [
         host.domains.join(' '),
         host.type,
@@ -97,33 +108,33 @@ export default function Hosts() {
         .join(' ')
         .toLowerCase()
         .includes(query)
-      if (!textMatches || (typeFilter !== 'all' && host.type !== typeFilter)) return false
-      if (stateFilter === 'enabled' && !host.enabled) return false
-      if (stateFilter === 'disabled' && host.enabled) return false
+      if (!textMatches || (typeFilter() !== 'all' && host.type !== typeFilter())) return false
+      if (stateFilter() === 'enabled' && !host.enabled) return false
+      if (stateFilter() === 'disabled' && host.enabled) return false
 
       const sslMode = host.isolate_certs ? 'isolated' : host.cert_id ? 'shared' : 'none'
-      if (sslFilter !== 'all' && sslMode !== sslFilter) return false
+      if (sslFilter() !== 'all' && sslMode !== sslFilter()) return false
 
-      if (healthFilter !== 'all') {
-        const results = health[host.id]
+      if (healthFilter() !== 'all') {
+        const results = health()[host.id]
         const isLoadBalancer = host.type === 'load_balancer'
         const isHealthy = isLoadBalancer && !!results?.length && results.every((backend) => backend.healthy)
         const isUnhealthy =
-          isLoadBalancer && (!!healthError[host.id] || (!!results?.length && results.some((backend) => !backend.healthy)))
+          isLoadBalancer && (!!healthError()[host.id] || (!!results?.length && results.some((backend) => !backend.healthy)))
         const isOff = isLoadBalancer && !host.health_check
         const isPending =
-          isLoadBalancer && host.health_check && !healthError[host.id] && !results?.length && !healthBusy[host.id]
-        if (healthFilter === 'healthy' && !isHealthy) return false
-        if (healthFilter === 'unhealthy' && !isUnhealthy) return false
-        if (healthFilter === 'off' && !isOff) return false
-        if (healthFilter === 'pending' && !isPending) return false
+          isLoadBalancer && host.health_check && !healthError()[host.id] && !results?.length && !healthBusy()[host.id]
+        if (healthFilter() === 'healthy' && !isHealthy) return false
+        if (healthFilter() === 'unhealthy' && !isUnhealthy) return false
+        if (healthFilter() === 'off' && !isOff) return false
+        if (healthFilter() === 'pending' && !isPending) return false
       }
       return true
     })
-  }, [hosts, search, typeFilter, stateFilter, sslFilter, healthFilter, health, healthError, healthBusy])
+  })
   const paged = usePaged(filteredHosts)
 
-  const checkHealth = useCallback(async (host: Host) => {
+  const checkHealth = async (host: Host) => {
     setHealthBusy((current) => ({ ...current, [host.id]: true }))
     setHealthError((current) => ({ ...current, [host.id]: '' }))
     try {
@@ -134,31 +145,31 @@ export default function Hosts() {
     } finally {
       setHealthBusy((current) => ({ ...current, [host.id]: false }))
     }
-  }, [])
+  }
 
   const reload = async () => {
     setHosts((await get('/api/v1/hosts')) ?? [])
     setCerts((await get('/api/v1/certs')) ?? [])
     setAcls((await get('/api/v1/accesslists')) ?? [])
   }
-  useEffect(() => {
+  onMount(() => {
     run(reload)
-  }, [])
+  })
 
-  useEffect(() => {
-    const enabled = hosts.filter((host) => host.type === 'load_balancer' && host.health_check)
+  createEffect(() => {
+    const enabled = hosts().filter((host) => host.type === 'load_balancer' && host.health_check)
     if (enabled.length === 0) return
     const checkAll = () => enabled.forEach(checkHealth)
     checkAll()
     const timer = window.setInterval(checkAll, 30_000)
-    return () => window.clearInterval(timer)
-  }, [hosts, checkHealth])
+    onCleanup(() => window.clearInterval(timer))
+  })
 
   const save = () =>
     run(async () => {
-      if (!edit) return
+      if (!editOpen()) return
       if (edit.id === 0) await post('/api/v1/hosts', { ...edit, id: undefined })
-      else await put(`/api/v1/hosts/${edit.id}`, edit)
+      else await put(`/api/v1/hosts/${edit.id}`, { ...edit })
       setEdit(null)
       await reload()
     })
@@ -187,26 +198,26 @@ export default function Hosts() {
 
   return (
     <section>
-      <div className="bar">
+      <div class="bar">
         <h2>Hosts</h2>
         <button onClick={() => openHost(empty)}>+ Add host</button>
       </div>
-      <div className="filter-bar" aria-label="Host filters">
+      <div class="filter-bar" aria-label="Host filters">
         <input
           type="search"
           aria-label="Search hosts"
           placeholder="Domain, target, backend..."
-          value={search}
+          value={search()}
           onChange={(e) => {
-            setSearch(e.target.value)
+            setSearch(e.currentTarget.value)
             paged.setPage(1)
           }}
         />
         <select
           aria-label="Filter hosts by type"
-          value={typeFilter}
+          value={typeFilter()}
           onChange={(e) => {
-            setTypeFilter(e.target.value)
+            setTypeFilter(e.currentTarget.value)
             paged.setPage(1)
           }}
         >
@@ -218,9 +229,9 @@ export default function Hosts() {
         </select>
         <select
           aria-label="Filter hosts by state"
-          value={stateFilter}
+          value={stateFilter()}
           onChange={(e) => {
-            setStateFilter(e.target.value)
+            setStateFilter(e.currentTarget.value)
             paged.setPage(1)
           }}
         >
@@ -230,9 +241,9 @@ export default function Hosts() {
         </select>
         <select
           aria-label="Filter hosts by SSL mode"
-          value={sslFilter}
+          value={sslFilter()}
           onChange={(e) => {
-            setSSLFilter(e.target.value)
+            setSSLFilter(e.currentTarget.value)
             paged.setPage(1)
           }}
         >
@@ -243,9 +254,9 @@ export default function Hosts() {
         </select>
         <select
           aria-label="Filter hosts by health"
-          value={healthFilter}
+          value={healthFilter()}
           onChange={(e) => {
-            setHealthFilter(e.target.value)
+            setHealthFilter(e.currentTarget.value)
             paged.setPage(1)
           }}
         >
@@ -257,7 +268,7 @@ export default function Hosts() {
         </select>
         <button
           type="button"
-          disabled={!search && typeFilter === 'all' && stateFilter === 'all' && sslFilter === 'all' && healthFilter === 'all'}
+          disabled={!search() && typeFilter() === 'all' && stateFilter() === 'all' && sslFilter() === 'all' && healthFilter() === 'all'}
           onClick={() => {
             setSearch('')
             setTypeFilter('all')
@@ -270,7 +281,7 @@ export default function Hosts() {
           Clear
         </button>
       </div>
-      <Err msg={error} />
+      <Err msg={error()} />
       <table>
         <thead>
           <tr>
@@ -285,44 +296,44 @@ export default function Hosts() {
           </tr>
         </thead>
         <tbody>
-          {paged.rows.map((h) => (
-            <tr key={h.id}>
+          {paged.rows().map((h) => (
+            <tr>
               <td>{h.domains.join(', ')}</td>
               <td>{h.type}</td>
               <td>{h.type === 'load_balancer' ? `${h.upstreams?.length ?? 0} backends` : h.target}</td>
               <td>
                 {h.type !== 'load_balancer' ? (
-                  <span className="health-status neutral">{'\u2014'}</span>
+                  <span class="health-status neutral">{'\u2014'}</span>
                 ) : !h.health_check ? (
-                  <span className="health-status neutral">off</span>
-                ) : healthError[h.id] ? (
+                  <span class="health-status neutral">off</span>
+                ) : healthError()[h.id] ? (
                   <button
                     type="button"
-                    className="health-status error"
-                    title={healthError[h.id]}
+                    class="health-status error"
+                    title={healthError()[h.id]}
                     onClick={() => checkHealth(h)}
                   >
                     check failed
                   </button>
-                ) : health[h.id] ? (
+                ) : health()[h.id] ? (
                   <button
                     type="button"
-                    className={`health-status ${health[h.id].every((backend) => backend.healthy) ? 'ok' : 'error'}`}
-                    title={health[h.id]
+                    class={`health-status ${health()[h.id].every((backend) => backend.healthy) ? 'ok' : 'error'}`}
+                    title={health()[h.id]
                       .map((backend) => `${backend.address}: ${backend.healthy ? `${backend.status_code} in ${backend.latency_ms}ms` : backend.error}`)
                       .join('\n')}
                     onClick={() => checkHealth(h)}
                   >
-                    {health[h.id].filter((backend) => backend.healthy).length}/{health[h.id].length} healthy
+                    {health()[h.id].filter((backend) => backend.healthy).length}/{health()[h.id].length} healthy
                   </button>
                 ) : (
                   <button
                     type="button"
-                    className="health-status neutral"
-                    disabled={healthBusy[h.id]}
+                    class="health-status neutral"
+                    disabled={healthBusy()[h.id]}
                     onClick={() => checkHealth(h)}
                   >
-                    {healthBusy[h.id] ? 'checking...' : 'check'}
+                    {healthBusy()[h.id] ? 'checking...' : 'check'}
                   </button>
                 )}
               </td>
@@ -347,10 +358,10 @@ export default function Hosts() {
       </table>
       <Pagination {...paged} />
 
-      {edit && (
+      {editOpen() && (
         <Modal onClose={() => setEdit(null)}>
         <form
-          className="editor"
+          class="editor"
           onSubmit={(e) => {
             e.preventDefault()
             save()
@@ -399,7 +410,7 @@ export default function Hosts() {
               </Row>
               {edit.upstream_scheme === 'https' && (
                 <>
-                  <div className="checks">
+                  <div class="checks">
                     <Check
                       label="Verify backend TLS certificate"
                       checked={edit.verify_backend_tls}
@@ -422,7 +433,7 @@ export default function Hosts() {
                         value={edit.backend_tls_server_name}
                         onChange={(e) => setEdit({ ...edit, backend_tls_server_name: e.target.value.trim() })}
                       />
-                      <p className="hint">
+                      <p class="hint">
                         Every backend certificate must be valid for this name and chain to a CA in the system trust store.
                       </p>
                     </Row>
@@ -449,7 +460,7 @@ export default function Hosts() {
                   <option value="ip_hash">IP hash (sticky by client IP)</option>
                 </select>
               </Row>
-              <div className="checks">
+              <div class="checks">
                 <Check
                   label="Active backend health check"
                   checked={edit.health_check}
@@ -458,7 +469,7 @@ export default function Hosts() {
               </div>
               {edit.health_check && (
                 <Row label="Health check">
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) 140px', gap: 8 }}>
+                  <div style={{ display: 'grid', 'grid-template-columns': 'minmax(180px, 1fr) 140px', gap: '8px' }}>
                     <input
                       required
                       placeholder="/health"
@@ -475,7 +486,7 @@ export default function Hosts() {
                       onChange={(e) => setEdit({ ...edit, health_check_timeout: +e.target.value })}
                     />
                   </div>
-                  <p className="hint">
+                  <p class="hint">
                     GET path / timeout in seconds. Status 200-399 is healthy; the Hosts page refreshes probes every 30 seconds.
                   </p>
                 </Row>
@@ -484,8 +495,7 @@ export default function Hosts() {
                 <div>
                   {edit.upstreams.map((upstream, i) => (
                     <div
-                      key={i}
-                      style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 2fr) 80px 90px 100px auto auto', gap: 6, marginBottom: 6, alignItems: 'center' }}
+                      style={{ display: 'grid', 'grid-template-columns': 'minmax(180px, 2fr) 80px 90px 100px auto auto', gap: '6px', 'margin-bottom': '6px', 'align-items': 'center' }}
                     >
                       <input
                         required
@@ -532,7 +542,7 @@ export default function Hosts() {
                           setEdit({ ...edit, upstreams })
                         }}
                       />
-                      <label className="check" title="Only use this backend when primary backends are unavailable">
+                      <label class="check" title="Only use this backend when primary backends are unavailable">
                         <input
                           type="checkbox"
                           checked={upstream.backup}
@@ -554,7 +564,7 @@ export default function Hosts() {
                       </button>
                     </div>
                   ))}
-                  <p className="hint">Columns: address, weight, max failures, failure timeout, backup.</p>
+                  <p class="hint">Columns: address, weight, max failures, failure timeout, backup.</p>
                   <button
                     type="button"
                     onClick={() =>
@@ -587,7 +597,7 @@ export default function Hosts() {
           )}
           <CertPicker
             value={edit.cert_id}
-            certs={certs}
+            certs={certs()}
             defaultDomains={edit.domains}
             noneLabel="— none (http only) —"
             onChange={(id) => setEdit((current) => (current ? { ...current, cert_id: id } : current))}
@@ -604,14 +614,14 @@ export default function Hosts() {
           <Row label="Access list">
             <select value={edit.access_list_id} onChange={(e) => setEdit({ ...edit, access_list_id: +e.target.value })}>
               <option value={0}>— none —</option>
-              {acls.map((l) => (
-                <option key={l.id} value={l.id}>
+              {acls().map((l) => (
+                <option value={l.id}>
                   {l.name}
                 </option>
               ))}
             </select>
           </Row>
-          <div className="checks">
+          <div class="checks">
             <Check label="Enabled" checked={edit.enabled} onChange={(v) => setEdit({ ...edit, enabled: v })} />
             <Check label="Force SSL" checked={edit.force_ssl} onChange={(v) => setEdit({ ...edit, force_ssl: v })} />
             <Check label="HTTP/2" checked={edit.http2} onChange={(v) => setEdit({ ...edit, http2: v })} />
@@ -625,12 +635,12 @@ export default function Hosts() {
           <Row label="Directives (server context — rendered as `name value;`)">
             <datalist id="nginx-directives">
               {directiveNames.map((d) => (
-                <option key={d} value={d} />
+                <option value={d} />
               ))}
             </datalist>
             <div>
               {edit.directives.map((d, i) => (
-                <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                <div style={{ display: 'flex', gap: '6px', 'margin-bottom': '6px' }}>
                   <input
                     list="nginx-directives"
                     placeholder="client_max_body_size"
@@ -665,7 +675,7 @@ export default function Hosts() {
               >
                 <option value="">+ add rule…</option>
                 {directivePresets.map((p) => (
-                  <option key={p.label} value={p.key}>
+                  <option value={p.key}>
                     {p.label} ({p.key} {p.value})
                   </option>
                 ))}
@@ -689,8 +699,8 @@ export default function Hosts() {
               placeholder="proxy_read_timeout 300s;"
             />
           </Row>
-          <div className="bar">
-            <button type="submit" disabled={busy}>
+          <div class="bar">
+            <button type="submit" disabled={busy()}>
               Save & apply
             </button>
             <button type="button" onClick={() => setEdit(null)}>

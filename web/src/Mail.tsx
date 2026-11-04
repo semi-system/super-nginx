@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { createSignal, onMount } from 'solid-js'
 import { get, post, put, del, MailListener, MailDomain, Cert } from './api'
 import { Err, Row, Check, Modal, Pagination, useAsync, usePaged } from './ui'
 import CertPicker from './CertPicker'
@@ -21,11 +21,11 @@ const presets = [['smtp', 2465, 465], ['imap', 2993, 993], ['pop3', 2995, 995]] 
 const emptyDomain: MailDomain = { id: 0, domain: '', cert_id: 0 }
 
 export default function Mail() {
-  const [listeners, setListeners] = useState<MailListener[]>([])
-  const [domains, setDomains] = useState<MailDomain[]>([])
-  const [certs, setCerts] = useState<Cert[]>([])
-  const [editL, setEditL] = useState<MailListener | null>(null)
-  const [editD, setEditD] = useState<MailDomain | null>(null)
+  const [listeners, setListeners] = createSignal<MailListener[]>([])
+  const [domains, setDomains] = createSignal<MailDomain[]>([])
+  const [certs, setCerts] = createSignal<Cert[]>([])
+  const [editL, setEditL] = createSignal<MailListener | null>(null)
+  const [editD, setEditD] = createSignal<MailDomain | null>(null)
   const { error, busy, run } = useAsync()
   const domainPaged = usePaged(domains)
   const listenerPaged = usePaged(listeners)
@@ -35,24 +35,26 @@ export default function Mail() {
     setDomains((await get('/api/v1/mail/domains')) ?? [])
     setCerts((await get('/api/v1/certs')) ?? [])
   }
-  useEffect(() => {
+  onMount(() => {
     run(reload)
-  }, [])
+  })
 
   const saveL = () =>
     run(async () => {
-      if (!editL) return
-      if (editL.id === 0) await post('/api/v1/mail/listeners', { ...editL, id: undefined })
-      else await put(`/api/v1/mail/listeners/${editL.id}`, editL)
+      const current = editL()
+      if (!current) return
+      if (current.id === 0) await post('/api/v1/mail/listeners', { ...current, id: undefined })
+      else await put(`/api/v1/mail/listeners/${current.id}`, current)
       setEditL(null)
       await reload()
     })
 
   const saveD = () =>
     run(async () => {
-      if (!editD) return
-      if (editD.id === 0) await post('/api/v1/mail/domains', { ...editD, id: undefined })
-      else await put(`/api/v1/mail/domains/${editD.id}`, editD)
+      const current = editD()
+      if (!current) return
+      if (current.id === 0) await post('/api/v1/mail/domains', { ...current, id: undefined })
+      else await put(`/api/v1/mail/domains/${current.id}`, current)
       setEditD(null)
       await reload()
     })
@@ -84,7 +86,7 @@ export default function Mail() {
   return (
     <section>
       <h2>Mail proxy</h2>
-      <p className="hint">
+      <p class="hint">
         Pure TCP/TLS proxy (nginx stream) — authentication stays on the backend mail server.
         Terminate mode ends TLS here with SNI per-domain certificates (implicit TLS: SMTPS 465,
         IMAPS 993, POP3S 995) and forwards plaintext, so the backend is its plain port (IMAP 143,
@@ -93,9 +95,9 @@ export default function Mail() {
         Domains only pick the certificate by SNI and apply to every listener; each listener
         forwards all of them to its own backend.
       </p>
-      <Err msg={error} />
+      <Err msg={error()} />
 
-      <div className="bar">
+      <div class="bar">
         <h3>Domains</h3>
         <button onClick={() => setEditD({ ...emptyDomain })}>+ Add domain</button>
       </div>
@@ -108,10 +110,10 @@ export default function Mail() {
           </tr>
         </thead>
         <tbody>
-          {domainPaged.rows.map((d) => (
-            <tr key={d.id}>
+          {domainPaged.rows().map((d) => (
+            <tr>
               <td>{d.domain}</td>
-              <td>{certs.find((c) => c.id === d.cert_id)?.name || '—'}</td>
+              <td>{certs().find((c) => c.id === d.cert_id)?.name || '—'}</td>
               <td>
                 <button onClick={() => setEditD({ ...d })}>Edit</button>{' '}
                 <button onClick={() => removeD(d.id)}>Delete</button>
@@ -122,33 +124,33 @@ export default function Mail() {
       </table>
       <Pagination {...domainPaged} />
 
-      {editD && (
+      {editD() && (
         <Modal onClose={() => setEditD(null)}>
-        <form className="editor" onSubmit={(e) => { e.preventDefault(); saveD() }}>
-          <h3>{editD.id ? 'Edit domain' : 'New mail domain'}</h3>
+        <form class="editor" onSubmit={(e) => { e.preventDefault(); saveD() }}>
+          <h3>{editD()!.id ? 'Edit domain' : 'New mail domain'}</h3>
           <Row label="Domain (as sent in SNI, e.g. mail.example.com)">
-            <input value={editD.domain} onChange={(e) => setEditD({ ...editD, domain: e.target.value })} />
+            <input value={editD()!.domain} onInput={(e) => setEditD({ ...editD()!, domain: e.currentTarget.value })} />
           </Row>
           <CertPicker
             label="Certificate (served on every terminate listener — can be the same cert an HTTPS host uses)"
-            value={editD.cert_id}
-            certs={certs}
-            defaultDomains={editD.domain ? [editD.domain] : []}
-            onChange={(id) => setEditD({ ...editD, cert_id: id })}
+            value={editD()!.cert_id}
+            certs={certs()}
+            defaultDomains={editD()!.domain ? [editD()!.domain] : []}
+            onChange={(id) => setEditD({ ...editD()!, cert_id: id })}
             onCertsChanged={setCerts}
           />
-          <div className="bar">
-            <button type="submit" disabled={busy}>Save & apply</button>
+          <div class="bar">
+            <button type="submit" disabled={busy()}>Save & apply</button>
             <button type="button" onClick={() => setEditD(null)}>Cancel</button>
           </div>
         </form>
         </Modal>
       )}
 
-      <div className="bar">
+      <div class="bar">
         <h3>Listeners</h3>
         <button onClick={() => setEditL({ ...emptyListener })}>+ Add listener</button>
-        <button onClick={addPresets} disabled={busy} title="Creates 2465→host:465, 2993→host:993, 2995→host:995 (terminate, re-encrypt). Add a domain with a certificate first.">
+        <button onClick={addPresets} disabled={busy()} title="Creates 2465→host:465, 2993→host:993, 2995→host:995 (terminate, re-encrypt). Add a domain with a certificate first.">
           + SMTPS / IMAPS / POP3S
         </button>
       </div>
@@ -164,8 +166,8 @@ export default function Mail() {
           </tr>
         </thead>
         <tbody>
-          {listenerPaged.rows.map((l) => (
-            <tr key={l.id}>
+          {listenerPaged.rows().map((l) => (
+            <tr>
               <td>{l.label}</td>
               <td>{l.port}</td>
               <td>{l.mode}{l.mode === 'terminate' && l.proxy_ssl ? ' (re-encrypt)' : ''}</td>
@@ -181,14 +183,14 @@ export default function Mail() {
       </table>
       <Pagination {...listenerPaged} />
 
-      {editL && (
+      {editL() && (
         <Modal onClose={() => setEditL(null)}>
-        <form className="editor" onSubmit={(e) => { e.preventDefault(); saveL() }}>
-          <h3>{editL.id ? 'Edit listener' : 'New listener'}</h3>
+        <form class="editor" onSubmit={(e) => { e.preventDefault(); saveL() }}>
+          <h3>{editL()!.id ? 'Edit listener' : 'New listener'}</h3>
           <Row label="Protocol (display only)">
             <select
-              value={knownProtocols.includes(editL.label) ? editL.label : 'other'}
-              onChange={(e) => setEditL({ ...editL, label: e.target.value === 'other' ? '' : e.target.value })}
+              value={knownProtocols.includes(editL()!.label) ? editL()!.label : 'other'}
+              onChange={(e) => setEditL({ ...editL()!, label: e.currentTarget.value === 'other' ? '' : e.currentTarget.value })}
             >
               <option value="smtp">smtp</option>
               <option value="imap">imap</option>
@@ -196,35 +198,35 @@ export default function Mail() {
               <option value="other">other…</option>
             </select>
           </Row>
-          {!knownProtocols.includes(editL.label) && (
+          {!knownProtocols.includes(editL()!.label) && (
             <Row label="Custom protocol name">
-              <input value={editL.label} onChange={(e) => setEditL({ ...editL, label: e.target.value })} />
+              <input value={editL()!.label} onInput={(e) => setEditL({ ...editL()!, label: e.currentTarget.value })} />
             </Row>
           )}
           <Row label="Container port (>1024; map from host, e.g. 465 → 2465)">
-            <input type="number" value={editL.port} onChange={(e) => setEditL({ ...editL, port: +e.target.value })} />
+            <input type="number" value={editL()!.port} onInput={(e) => setEditL({ ...editL()!, port: +e.currentTarget.value })} />
           </Row>
           <Row label="Mode">
-            <select value={editL.mode} onChange={(e) => setEditL({ ...editL, mode: e.target.value as MailListener['mode'] })}>
+            <select value={editL()!.mode} onChange={(e) => setEditL({ ...editL()!, mode: e.currentTarget.value as MailListener['mode'] })}>
               <option value="terminate">terminate (TLS ends here, SNI certs)</option>
               <option value="passthrough">passthrough (raw TCP)</option>
             </select>
           </Row>
           <Row label="Backend (host:port — every mail domain on this listener goes here)">
             <input
-              value={editL.default_backend}
-              onChange={(e) => setEditL({ ...editL, default_backend: e.target.value })}
+              value={editL()!.default_backend}
+              onInput={(e) => setEditL({ ...editL()!, default_backend: e.currentTarget.value })}
               placeholder="10.0.0.5:465"
             />
           </Row>
-          <div className="checks">
-            <Check label="Enabled" checked={editL.enabled} onChange={(v) => setEditL({ ...editL, enabled: v })} />
-            {editL.mode === 'terminate' && (
-              <Check label="Re-encrypt to backend (proxy_ssl → backend TLS port e.g. 993)" checked={editL.proxy_ssl} onChange={(v) => setEditL({ ...editL, proxy_ssl: v })} />
+          <div class="checks">
+            <Check label="Enabled" checked={editL()!.enabled} onChange={(v) => setEditL({ ...editL()!, enabled: v })} />
+            {editL()!.mode === 'terminate' && (
+              <Check label="Re-encrypt to backend (proxy_ssl → backend TLS port e.g. 993)" checked={editL()!.proxy_ssl} onChange={(v) => setEditL({ ...editL()!, proxy_ssl: v })} />
             )}
           </div>
-          <div className="bar">
-            <button type="submit" disabled={busy}>Save & apply</button>
+          <div class="bar">
+            <button type="submit" disabled={busy()}>Save & apply</button>
             <button type="button" onClick={() => setEditL(null)}>Cancel</button>
           </div>
         </form>

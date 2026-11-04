@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { createSignal, onMount } from 'solid-js'
 import { get, post, put, del } from './api'
 import { Err, Row, Modal, Pagination, useAsync, usePaged } from './ui'
 
@@ -23,28 +23,29 @@ type EditState = {
 const empty: EditState = { id: 0, name: '', satisfy: 'all', users: [], allow: '', deny: '' }
 
 export default function Access() {
-  const [lists, setLists] = useState<ListOut[]>([])
-  const [edit, setEdit] = useState<EditState | null>(null)
+  const [lists, setLists] = createSignal<ListOut[]>([])
+  const [edit, setEdit] = createSignal<EditState | null>(null)
   const { error, busy, run } = useAsync()
   const paged = usePaged(lists)
 
   const reload = async () => setLists((await get('/api/v1/accesslists')) ?? [])
-  useEffect(() => {
+  onMount(() => {
     run(reload)
-  }, [])
+  })
 
   const save = () =>
     run(async () => {
-      if (!edit) return
+      const current = edit()
+      if (!current) return
       const body = {
-        name: edit.name,
-        satisfy: edit.satisfy,
-        users: edit.users.filter((u) => u.username),
-        allow: edit.allow.split(/\s+/).filter(Boolean),
-        deny: edit.deny.split(/\s+/).filter(Boolean),
+        name: current.name,
+        satisfy: current.satisfy,
+        users: current.users.filter((u) => u.username),
+        allow: current.allow.split(/\s+/).filter(Boolean),
+        deny: current.deny.split(/\s+/).filter(Boolean),
       }
-      if (edit.id === 0) await post('/api/v1/accesslists', body)
-      else await put(`/api/v1/accesslists/${edit.id}`, body)
+      if (current.id === 0) await post('/api/v1/accesslists', body)
+      else await put(`/api/v1/accesslists/${current.id}`, body)
       setEdit(null)
       await reload()
     })
@@ -68,12 +69,12 @@ export default function Access() {
 
   return (
     <section>
-      <div className="bar">
+      <div class="bar">
         <h2>Access lists</h2>
         <button onClick={() => setEdit({ ...empty, users: [] })}>+ Add list</button>
       </div>
-      <p className="hint">Basic auth users and/or IP allow/deny, attached to hosts in the host editor.</p>
-      <Err msg={error} />
+      <p class="hint">Basic auth users and/or IP allow/deny, attached to hosts in the host editor.</p>
+      <Err msg={error()} />
       <table>
         <thead>
           <tr>
@@ -85,8 +86,8 @@ export default function Access() {
           </tr>
         </thead>
         <tbody>
-          {paged.rows.map((l) => (
-            <tr key={l.id}>
+          {paged.rows().map((l) => (
+            <tr>
               <td>{l.name}</td>
               <td>{(l.users || []).join(', ') || '—'}</td>
               <td>{(l.allow || []).join(', ') || '—'}</td>
@@ -101,30 +102,30 @@ export default function Access() {
       </table>
       <Pagination {...paged} />
 
-      {edit && (
+      {edit() && (
         <Modal onClose={() => setEdit(null)}>
-        <form className="editor" onSubmit={(e) => { e.preventDefault(); save() }}>
-          <h3>{edit.id ? 'Edit access list' : 'New access list'}</h3>
+        <form class="editor" onSubmit={(e) => { e.preventDefault(); save() }}>
+          <h3>{edit()!.id ? 'Edit access list' : 'New access list'}</h3>
           <Row label="Name">
-            <input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+            <input value={edit()!.name} onInput={(e) => setEdit({ ...edit()!, name: e.currentTarget.value })} />
           </Row>
           <Row label="Satisfy (when both users and IP rules present)">
-            <select value={edit.satisfy} onChange={(e) => setEdit({ ...edit, satisfy: e.target.value })}>
+            <select value={edit()!.satisfy} onChange={(e) => setEdit({ ...edit()!, satisfy: e.currentTarget.value })}>
               <option value="all">all — must pass auth AND ip rules</option>
               <option value="any">any — either is enough</option>
             </select>
           </Row>
           <Row label="Users (leave password blank to keep existing)">
             <div>
-              {edit.users.map((u, i) => (
-                <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+              {edit()!.users.map((u, i) => (
+                <div style={{ display: 'flex', gap: '6px', 'margin-bottom': '6px' }}>
                   <input
                     placeholder="username"
                     value={u.username}
                     onChange={(e) => {
-                      const users = [...edit.users]
+                      const users = [...edit()!.users]
                       users[i] = { ...u, username: e.target.value }
-                      setEdit({ ...edit, users })
+                      setEdit({ ...edit()!, users })
                     }}
                   />
                   <input
@@ -132,29 +133,29 @@ export default function Access() {
                     type="password"
                     value={u.password}
                     onChange={(e) => {
-                      const users = [...edit.users]
+                      const users = [...edit()!.users]
                       users[i] = { ...u, password: e.target.value }
-                      setEdit({ ...edit, users })
+                      setEdit({ ...edit()!, users })
                     }}
                   />
-                  <button type="button" onClick={() => setEdit({ ...edit, users: edit.users.filter((_, j) => j !== i) })}>
+                  <button type="button" onClick={() => setEdit({ ...edit()!, users: edit()!.users.filter((_, j) => j !== i) })}>
                     ✕
                   </button>
                 </div>
               ))}
-              <button type="button" onClick={() => setEdit({ ...edit, users: [...edit.users, { username: '', password: '' }] })}>
+              <button type="button" onClick={() => setEdit({ ...edit()!, users: [...edit()!.users, { username: '', password: '' }] })}>
                 + user
               </button>
             </div>
           </Row>
           <Row label="Allow (IP/CIDR, one per line — implies deny all others)">
-            <textarea rows={3} value={edit.allow} onChange={(e) => setEdit({ ...edit, allow: e.target.value })} placeholder="10.0.0.0/8" />
+            <textarea rows={3} value={edit()!.allow} onInput={(e) => setEdit({ ...edit()!, allow: e.currentTarget.value })} placeholder="10.0.0.0/8" />
           </Row>
           <Row label="Deny (IP/CIDR, one per line)">
-            <textarea rows={2} value={edit.deny} onChange={(e) => setEdit({ ...edit, deny: e.target.value })} />
+            <textarea rows={2} value={edit()!.deny} onInput={(e) => setEdit({ ...edit()!, deny: e.currentTarget.value })} />
           </Row>
-          <div className="bar">
-            <button type="submit" disabled={busy}>Save & apply</button>
+          <div class="bar">
+            <button type="submit" disabled={busy()}>Save & apply</button>
             <button type="button" onClick={() => setEdit(null)}>Cancel</button>
           </div>
         </form>

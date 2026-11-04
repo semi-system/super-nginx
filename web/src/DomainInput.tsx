@@ -1,64 +1,57 @@
-import { useState, KeyboardEvent, ClipboardEvent } from 'react'
+import { createSignal, JSX } from 'solid-js'
 
-// NPM-style tag input: type a domain, Enter/space/comma turns it into a chip.
-// Backspace on an empty field removes the last chip.
 const DOMAIN_RE = /^(\*\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$|^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/i
 
-export default function DomainInput({
-  value,
-  onChange,
-  placeholder = 'example.com',
-}: {
+export default function DomainInput(props: {
   value: string[]
-  onChange: (v: string[]) => void
+  onChange: (value: string[]) => void
   placeholder?: string
 }) {
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = createSignal('')
 
   const add = (raw: string) => {
-    const parts = raw.split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
-    const next = [...value]
-    for (const p of parts) if (!next.includes(p)) next.push(p)
-    onChange(next)
+    const next = [...props.value]
+    for (const domain of raw.split(/[\s,]+/).map((item) => item.trim().toLowerCase()).filter(Boolean)) {
+      if (!next.includes(domain)) next.push(domain)
+    }
+    props.onChange(next)
   }
 
   const commitDraft = () => {
-    if (draft.trim()) add(draft)
+    if (draft().trim()) add(draft())
     setDraft('')
   }
 
-  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' || e.key === ',' || e.key === ' ') {
-      e.preventDefault()
+  const onKeyDown: JSX.EventHandler<HTMLInputElement, KeyboardEvent> = (event) => {
+    if (event.key === 'Enter' || event.key === ',' || event.key === ' ') {
+      event.preventDefault()
       commitDraft()
-    } else if (e.key === 'Backspace' && !draft && value.length) {
-      onChange(value.slice(0, -1))
+    } else if (event.key === 'Backspace' && !draft() && props.value.length) {
+      props.onChange(props.value.slice(0, -1))
     }
   }
 
-  const onPaste = (e: ClipboardEvent<HTMLInputElement>) => {
-    e.preventDefault()
-    add(e.clipboardData.getData('text'))
+  const onPaste: JSX.EventHandler<HTMLInputElement, ClipboardEvent> = (event) => {
+    event.preventDefault()
+    add(event.clipboardData?.getData('text') ?? '')
     setDraft('')
   }
 
   return (
-    <div className="tags" onClick={(e) => (e.currentTarget.querySelector('input') as HTMLInputElement)?.focus()}>
-      {value.map((d) => (
-        <span key={d} className={'tag' + (DOMAIN_RE.test(d) ? '' : ' tag-bad')}>
-          {d}
-          <button type="button" onClick={() => onChange(value.filter((x) => x !== d))}>
-            ✕
-          </button>
+    <div class="tags picker-control" onClick={(event) => event.currentTarget.querySelector('input')?.focus()}>
+      {props.value.map((domain) => (
+        <span class={`tag${DOMAIN_RE.test(domain) ? '' : ' tag-bad'}`}>
+          {domain}
+          <button type="button" aria-label={`Remove ${domain}`} onClick={() => props.onChange(props.value.filter((item) => item !== domain))}>×</button>
         </span>
       ))}
       <input
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        value={draft()}
+        onInput={(event) => setDraft(event.currentTarget.value)}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
         onBlur={commitDraft}
-        placeholder={value.length ? '' : placeholder}
+        placeholder={props.value.length ? '' : (props.placeholder ?? 'example.com')}
       />
     </div>
   )

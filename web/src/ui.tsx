@@ -1,116 +1,100 @@
-import { useState, useEffect, useMemo } from 'react'
+import { Accessor, createMemo, createSignal, JSX, onCleanup, onMount } from 'solid-js'
 import { pageCount, clampPage, pageSlice, pageWindow } from './paging'
 
-// Tiny shared form helpers — no UI library, just the S!mple design system classes.
-
-// Modal: overlay + centered box. Backdrop click or Escape closes.
-export function Modal({ onClose, children }: { onClose: () => void; children: any }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+// Shared primitives keep modal, field, checkbox, async, and paging behaviour
+// consistent across every section of the control panel.
+export function Modal(props: { onClose: () => void; children: JSX.Element }) {
+  onMount(() => {
+    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && props.onClose()
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+    onCleanup(() => window.removeEventListener('keydown', onKey))
+  })
+
   return (
-    <div className="modal-backdrop open" onMouseDown={onClose}>
-      <div className="modal modal-lg" onMouseDown={(e) => e.stopPropagation()}>
-        {children}
+    <div class="modal-backdrop open" onMouseDown={props.onClose}>
+      <div class="modal modal-lg" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+        {props.children}
       </div>
     </div>
   )
 }
 
-export function Err({ msg }: { msg: string | null }) {
-  if (!msg) return null
-  return <p className="error">{msg}</p>
+export function Err(props: { msg: string | null }) {
+  return <>{props.msg && <p class="alert alert-danger">{props.msg}</p>}</>
 }
 
-export function Row({ label, children }: { label: string; children: any }) {
+export function Row(props: { label: string; hint?: string; children: JSX.Element }) {
   return (
-    <label className="row">
-      <span>{label}</span>
-      {children}
+    <label class="row">
+      <span>{props.label}</span>
+      {props.children}
+      {props.hint && <small class="field-hint">{props.hint}</small>}
     </label>
   )
 }
 
-export function Check({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string
-  checked: boolean
-  onChange: (v: boolean) => void
-}) {
+export function Check(props: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
   return (
-    <label className="check">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      {label}
+    <label class="check">
+      <input type="checkbox" checked={props.checked} onChange={(event) => props.onChange(event.currentTarget.checked)} />
+      <span>{props.label}</span>
     </label>
   )
 }
 
-// Client-side paging for a list already held in memory.
-export function usePaged<T>(items: T[], size = 10) {
-  const [page, setPage] = useState(1)
-  const pages = pageCount(items.length, size)
-  const current = clampPage(page, pages)
-  const rows = useMemo(() => pageSlice(items, current, size), [items, current, size])
-  return { rows, page: current, pages, setPage, total: items.length, size }
+export function usePaged<T>(items: Accessor<T[]>, size = 10) {
+  const [requestedPage, setPage] = createSignal(1)
+  const pages = createMemo(() => pageCount(items().length, size))
+  const page = createMemo(() => clampPage(requestedPage(), pages()))
+  const rows = createMemo(() => pageSlice(items(), page(), size))
+  return { rows, page, pages, setPage, total: () => items().length, size }
 }
 
 type Paged = ReturnType<typeof usePaged<any>>
 
-// Row count + page buttons. Renders nothing while everything fits on one page.
-export function Pagination({ page, pages, setPage, total, size }: Paged) {
-  if (pages < 2) return null
-  const from = (page - 1) * size + 1
+export function Pagination(props: Paged) {
+  const from = () => (props.page() - 1) * props.size + 1
   return (
-    <div className="pager">
-      <span className="pager-info">
-        {from}–{Math.min(page * size, total)} of {total}
+    <div class="pager" style={{ display: props.pages() < 2 ? 'none' : undefined }}>
+      <span class="pager-info">
+        {from()}–{Math.min(props.page() * props.size, props.total())} of {props.total()}
       </span>
-      <div className="pagination">
-        <button onClick={() => setPage(page - 1)} disabled={page === 1} aria-label="Previous page">
-          ‹
-        </button>
-        {pageWindow(page, pages).map((p, i) =>
-          p === '…' ? (
-            <span key={`gap${i}`} className="ellipsis">
-              …
-            </span>
+      <div class="pagination">
+        <button onClick={() => props.setPage(props.page() - 1)} disabled={props.page() === 1} aria-label="Previous page">‹</button>
+        {pageWindow(props.page(), props.pages()).map((item) =>
+          item === '…' ? (
+            <span class="ellipsis" aria-hidden="true">…</span>
           ) : (
             <button
-              key={p}
-              className={p === page ? 'active' : ''}
-              aria-current={p === page ? 'page' : undefined}
-              onClick={() => setPage(p)}
+              class={item === props.page() ? 'active' : ''}
+              aria-current={item === props.page() ? 'page' : undefined}
+              onClick={() => props.setPage(item)}
             >
-              {p}
+              {item}
             </button>
           ),
         )}
-        <button onClick={() => setPage(page + 1)} disabled={page === pages} aria-label="Next page">
-          ›
-        </button>
+        <button onClick={() => props.setPage(props.page() + 1)} disabled={props.page() === props.pages()} aria-label="Next page">›</button>
       </div>
     </div>
   )
 }
 
 export function useAsync() {
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const run = async (fn: () => Promise<void>) => {
+  const [error, setError] = createSignal<string | null>(null)
+  const [busy, setBusy] = createSignal(false)
+
+  const run = async <T,>(task: () => Promise<T>) => {
     setBusy(true)
     setError(null)
     try {
-      await fn()
-    } catch (e: any) {
-      setError(e.message || String(e))
+      await task()
+    } catch (cause: any) {
+      setError(cause?.message || String(cause))
     } finally {
       setBusy(false)
     }
   }
+
   return { error, busy, run, setError }
 }
