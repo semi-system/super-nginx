@@ -24,6 +24,7 @@ RUN mkdir -p /data-skel
 FROM ${BASE_IMAGE}
 COPY --from=backend /super-nginx /usr/sbin/super-nginx
 COPY --from=backend --chown=65532:65532 /data-skel /data
+COPY bridge/nginx.conf bridge/nginx-ms.conf /etc/nginx/
 COPY bridge/conf.d/ /etc/nginx/conf.d/
 COPY bridge/mail.d/ /etc/nginx/mail.d/
 COPY bridge/stream.d/ /etc/nginx/stream.d/

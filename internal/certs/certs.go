@@ -14,9 +14,13 @@ import (
 	"encoding/pem"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-acme/lego/v4/certcrypto"
@@ -83,9 +87,102 @@ func (u *acmeUser) GetEmail() string                        { return u.Email }
 func (u *acmeUser) GetRegistration() *registration.Resource { return u.Reg }
 func (u *acmeUser) GetPrivateKey() crypto.PrivateKey        { return u.key }
 
-// acmeMu: one ACME operation at a time (lego env-based DNS config is
-// process-global, and the HTTP-01 solver binds a fixed port).
+// acmeMu keeps normal issuance/renewal mutually exclusive with an isolated
+// batch. IssueBatch holds it once while its prepared requests run in parallel.
 var acmeMu sync.Mutex
+
+type httpChallengeKey struct {
+	domain string
+	token  string
+}
+
+type httpChallengeEntry struct {
+	keyAuth string
+	refs    int
+}
+
+// sharedHTTPProvider serves every in-flight HTTP-01 token from one listener.
+// A separate lego ProviderServer per certificate cannot run concurrently
+// because every instance tries to bind the same internal ACME port.
+type sharedHTTPProvider struct {
+	once     sync.Once
+	startErr error
+
+	mu      sync.RWMutex
+	entries map[httpChallengeKey]httpChallengeEntry
+}
+
+var batchHTTPProvider = &sharedHTTPProvider{entries: make(map[httpChallengeKey]httpChallengeEntry)}
+
+func (p *sharedHTTPProvider) start() {
+	listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", engine.ACMEPort))
+	if err != nil {
+		p.startErr = fmt.Errorf("could not start shared HTTP challenge server: %w", err)
+		return
+	}
+	go func() {
+		if err := http.Serve(listener, p); err != nil && err != http.ErrServerClosed {
+			log.Printf("certs: shared HTTP challenge server: %v", err)
+		}
+	}()
+}
+
+func (p *sharedHTTPProvider) Present(domain, token, keyAuth string) error {
+	if http01.ChallengePath(token) != http01.PathPrefix+token {
+		return fmt.Errorf("invalid HTTP-01 challenge token")
+	}
+	p.once.Do(p.start)
+	if p.startErr != nil {
+		return p.startErr
+	}
+	key := httpChallengeKey{domain: strings.TrimSuffix(strings.ToLower(domain), "."), token: token}
+	p.mu.Lock()
+	entry := p.entries[key]
+	entry.keyAuth = keyAuth
+	entry.refs++
+	p.entries[key] = entry
+	p.mu.Unlock()
+	return nil
+}
+
+func (p *sharedHTTPProvider) CleanUp(domain, token, _ string) error {
+	key := httpChallengeKey{domain: strings.TrimSuffix(strings.ToLower(domain), "."), token: token}
+	p.mu.Lock()
+	entry, ok := p.entries[key]
+	if ok && entry.refs > 1 {
+		entry.refs--
+		p.entries[key] = entry
+	} else {
+		delete(p.entries, key)
+	}
+	p.mu.Unlock()
+	return nil
+}
+
+func (p *sharedHTTPProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, http01.PathPrefix) {
+		http.NotFound(w, r)
+		return
+	}
+	token := strings.TrimPrefix(r.URL.Path, http01.PathPrefix)
+	if token == "" || strings.Contains(token, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	host := r.Host
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		host = parsed
+	}
+	p.mu.RLock()
+	entry, ok := p.entries[httpChallengeKey{domain: strings.TrimSuffix(strings.ToLower(host), "."), token: token}]
+	p.mu.RUnlock()
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = w.Write([]byte(entry.keyAuth))
+}
 
 func loadUser(email string, staging bool) (*lego.Client, *acmeUser, error) {
 	if err := os.MkdirAll(acmeDir, 0o700); err != nil {
@@ -149,41 +246,43 @@ func loadUser(email string, staging bool) (*lego.Client, *acmeUser, error) {
 	return client, u, nil
 }
 
-// Issue obtains (or re-obtains) the certificate described by c and writes the
-// files. It mutates c (ExpiresAt/LastError) but does not touch the store.
-func Issue(c *store.Cert, settings store.Settings) error {
-	acmeMu.Lock()
-	defer acmeMu.Unlock()
-
+func prepareIssue(c *store.Cert, settings store.Settings, httpProvider *sharedHTTPProvider) (*lego.Client, error) {
 	if settings.ACMEEmail == "" {
-		return fmt.Errorf("set ACME email in Settings first")
+		return nil, fmt.Errorf("set ACME email in Settings first")
 	}
 	client, _, err := loadUser(settings.ACMEEmail, settings.ACMEStaging)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	switch c.Challenge {
 	case "dns":
 		for k, v := range c.DNSEnv {
-			os.Setenv(k, v)
+			_ = os.Setenv(k, v)
 		}
 		p, err := dns.NewDNSChallengeProviderByName(c.DNSProvider)
 		for k := range c.DNSEnv {
-			defer os.Unsetenv(k)
+			_ = os.Unsetenv(k)
 		}
 		if err != nil {
-			return fmt.Errorf("dns provider %q: %w", c.DNSProvider, err)
+			return nil, fmt.Errorf("dns provider %q: %w", c.DNSProvider, err)
 		}
 		if err := client.Challenge.SetDNS01Provider(p); err != nil {
-			return err
+			return nil, err
 		}
 	default: // http
-		if err := client.Challenge.SetHTTP01Provider(http01.NewProviderServer("127.0.0.1", engine.ACMEPort)); err != nil {
-			return err
+		if httpProvider == nil {
+			if err := client.Challenge.SetHTTP01Provider(http01.NewProviderServer("127.0.0.1", engine.ACMEPort)); err != nil {
+				return nil, err
+			}
+		} else if err := client.Challenge.SetHTTP01Provider(httpProvider); err != nil {
+			return nil, err
 		}
 	}
+	return client, nil
+}
 
+func obtain(client *lego.Client, c *store.Cert) error {
 	res, err := client.Certificate.Obtain(certificate.ObtainRequest{Domains: c.Domains, Bundle: true})
 	if err != nil {
 		return err
@@ -198,6 +297,87 @@ func Issue(c *store.Cert, settings store.Settings) error {
 	}
 	c.LastError = ""
 	return nil
+}
+
+// Issue obtains (or re-obtains) one certificate and writes its files. Normal
+// issuance stays serialized; isolated multi-domain requests use IssueBatch.
+func Issue(c *store.Cert, settings store.Settings) error {
+	acmeMu.Lock()
+	defer acmeMu.Unlock()
+
+	client, err := prepareIssue(c, settings, batchHTTPProvider)
+	if err != nil {
+		return err
+	}
+	return obtain(client, c)
+}
+
+type preparedIssue struct {
+	client *lego.Client
+	cert   *store.Cert
+}
+
+// runPreparedIssues is separated from ACME setup so concurrency and failure
+// behavior can be tested without contacting a certificate authority.
+func runPreparedIssues(items []preparedIssue, workers int, issue func(*lego.Client, *store.Cert) error) []error {
+	errs := make([]error, len(items))
+	if len(items) == 0 {
+		return errs
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > len(items) {
+		workers = len(items)
+	}
+
+	jobs := make(chan int)
+	var failed atomic.Bool
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				if failed.Load() {
+					continue
+				}
+				if err := issue(items[index].client, items[index].cert); err != nil {
+					errs[index] = err
+					failed.Store(true)
+				}
+			}
+		}()
+	}
+	for index := range items {
+		jobs <- index
+	}
+	close(jobs)
+	wg.Wait()
+	return errs
+}
+
+// IssueBatch prepares isolated certificates sequentially (account files and
+// DNS environment are process-global), then performs the slow ACME obtains in
+// parallel. The caller owns state rollback and removal of partially written
+// certificate files when any returned error is non-nil.
+func IssueBatch(certificates []*store.Cert, settings store.Settings) []error {
+	acmeMu.Lock()
+	defer acmeMu.Unlock()
+
+	errs := make([]error, len(certificates))
+	items := make([]preparedIssue, len(certificates))
+	for index, cert := range certificates {
+		client, err := prepareIssue(cert, settings, batchHTTPProvider)
+		if err != nil {
+			errs[index] = err
+			return errs
+		}
+		items[index] = preparedIssue{client: client, cert: cert}
+	}
+	// Isolated issuance is intentionally one goroutine per domain. Each item has
+	// its own lego client, while the HTTP-01 listener is shared safely.
+	return runPreparedIssues(items, len(items), obtain)
 }
 
 // RenewLoop renews ACME certs expiring within 30 days, checking every 12h.

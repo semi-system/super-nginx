@@ -107,7 +107,8 @@ func (a *API) audit(r *http.Request) {
 
 // applyLocked re-renders + reloads with the store lock already held.
 func (a *API) applyLocked() error {
-	return engine.Apply(&a.St.S, a.Sup, true)
+	// Backup restore may replace certificate bytes without changing their paths.
+	return engine.ApplyCertChange(&a.St.S, a.Sup)
 }
 
 // mutate runs fn on state under the lock, then applies + saves; on apply
@@ -124,6 +125,13 @@ func (a *API) mutate(w http.ResponseWriter, r *http.Request, fn func(*store.Stat
 // mutateResult is mutate plus a caller-provided success response. It is used
 // when a mutation creates ids the UI must attach in a following request.
 func (a *API) mutateResult(w http.ResponseWriter, r *http.Request, fn func(*store.State) (any, error)) {
+	a.mutateResultWithReload(w, r, false, fn)
+}
+
+// mutateResultWithReload is used when external files changed independently of
+// rendered config. A renewed certificate must reload nginx even when the
+// generated directives and certificate paths are byte-for-byte identical.
+func (a *API) mutateResultWithReload(w http.ResponseWriter, r *http.Request, forceReload bool, fn func(*store.State) (any, error)) {
 	a.St.Mu.Lock()
 	defer a.St.Mu.Unlock()
 	result, err := fn(&a.St.S)
@@ -131,9 +139,15 @@ func (a *API) mutateResult(w http.ResponseWriter, r *http.Request, fn func(*stor
 		fail(w, 400, "%s", err)
 		return
 	}
-	if err := engine.Apply(&a.St.S, a.Sup, true); err != nil {
+	var applyErr error
+	if forceReload {
+		applyErr = engine.ApplyCertChange(&a.St.S, a.Sup)
+	} else {
+		applyErr = engine.Apply(&a.St.S, a.Sup, true)
+	}
+	if applyErr != nil {
 		_ = a.St.Reload()
-		fail(w, 422, "config rejected: %s", err)
+		fail(w, 422, "config rejected: %s", applyErr)
 		return
 	}
 	if err := a.St.Save(); err != nil {
@@ -1006,34 +1020,62 @@ func (a *API) createIsolatedACMECerts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.mutateResult(w, r, func(s *store.State) (any, error) {
-		startSeq := s.Seq
-		created := make([]store.Cert, 0, len(in.Domains))
-		ids := make(map[string]int, len(in.Domains))
-		cleanup := func(currentID int) {
-			s.Seq = startSeq
-			if currentID != 0 {
-				certs.RemoveFiles(currentID)
-			}
-			for _, c := range created {
-				certs.RemoveFiles(c.ID)
-			}
+		ids, err := issueIsolatedACMECerts(s, in, certs.IssueBatch, certs.RemoveFiles)
+		if err != nil {
+			return nil, err
 		}
-		for _, domain := range in.Domains {
-			c := store.Cert{
-				ID: s.NextID(), Name: autoCertName(domain),
-				Type: "acme", Domains: []string{domain}, Challenge: in.Challenge,
-				DNSProvider: in.DNSProvider, DNSEnv: in.DNSEnv,
-			}
-			if err := certs.Issue(&c, s.Settings); err != nil {
-				cleanup(c.ID)
-				return nil, fmt.Errorf("ACME issue failed for domain %q: %w", domain, err)
-			}
-			created = append(created, c)
-			ids[domain] = c.ID
-		}
-		s.Certs = append(s.Certs, created...)
 		return map[string]any{"status": "ok", "cert_ids": ids}, nil
 	})
+}
+
+type isolatedCertBatchIssuer func([]*store.Cert, store.Settings) []error
+
+// issueIsolatedACMECerts owns the state side of isolated issuance: IDs and
+// names are allocated in domain order, ACME work runs as one parallel batch,
+// and any partial files/state are rolled back before an error is returned.
+func issueIsolatedACMECerts(
+	s *store.State,
+	in acmeRequest,
+	issue isolatedCertBatchIssuer,
+	removeFiles func(int),
+) (map[string]int, error) {
+	startSeq := s.Seq
+	created := make([]store.Cert, len(in.Domains))
+	certificates := make([]*store.Cert, len(in.Domains))
+	for index, domain := range in.Domains {
+		created[index] = store.Cert{
+			ID: s.NextID(), Name: autoCertName(domain),
+			Type: "acme", Domains: []string{domain}, Challenge: in.Challenge,
+			DNSProvider: in.DNSProvider, DNSEnv: in.DNSEnv,
+		}
+		certificates[index] = &created[index]
+	}
+
+	errs := issue(certificates, s.Settings)
+	rollback := func() {
+		s.Seq = startSeq
+		for _, cert := range created {
+			removeFiles(cert.ID)
+		}
+	}
+	if len(errs) != len(created) {
+		rollback()
+		return nil, fmt.Errorf("ACME isolated issue returned %d results for %d domains", len(errs), len(created))
+	}
+	for index, err := range errs {
+		if err == nil {
+			continue
+		}
+		rollback()
+		return nil, fmt.Errorf("ACME issue failed for domain %q: %w", in.Domains[index], err)
+	}
+
+	ids := make(map[string]int, len(created))
+	for _, cert := range created {
+		ids[cert.Domains[0]] = cert.ID
+	}
+	s.Certs = append(s.Certs, created...)
+	return ids, nil
 }
 
 func (a *API) renewCert(w http.ResponseWriter, r *http.Request) {
@@ -1042,19 +1084,19 @@ func (a *API) renewCert(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad id")
 		return
 	}
-	a.mutate(w, r, func(s *store.State) error {
+	a.mutateResultWithReload(w, r, true, func(s *store.State) (any, error) {
 		c := s.CertByID(id)
 		if c == nil {
-			return fmt.Errorf("cert %d not found", id)
+			return nil, fmt.Errorf("cert %d not found", id)
 		}
 		if c.Type != "acme" {
-			return fmt.Errorf("only acme certs can be renewed")
+			return nil, fmt.Errorf("only acme certs can be renewed")
 		}
 		if err := certs.Issue(c, s.Settings); err != nil {
 			c.LastError = err.Error()
-			return fmt.Errorf("renew failed: %w", err)
+			return nil, fmt.Errorf("renew failed: %w", err)
 		}
-		return nil
+		return map[string]string{"status": "ok"}, nil
 	})
 }
 

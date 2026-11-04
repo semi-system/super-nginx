@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -52,5 +53,64 @@ func TestCertCleanupCandidate(t *testing.T) {
 				t.Fatalf("certCleanupCandidate() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIssueIsolatedACMECertsBuildsOrderedCerts(t *testing.T) {
+	s := &store.State{Seq: 40, Settings: store.Settings{ACMEEmail: "admin@example.com"}}
+	in := acmeRequest{Domains: []string{"one.example.com", "two.example.com"}, Challenge: "http"}
+
+	ids, err := issueIsolatedACMECerts(s, in, func(certificates []*store.Cert, settings store.Settings) []error {
+		if settings.ACMEEmail != "admin@example.com" {
+			t.Fatalf("settings not passed to batch issuer: %+v", settings)
+		}
+		for _, cert := range certificates {
+			cert.ExpiresAt = time.Now().Add(90 * 24 * time.Hour)
+		}
+		return make([]error, len(certificates))
+	}, func(int) {})
+	if err != nil {
+		t.Fatalf("issueIsolatedACMECerts() error = %v", err)
+	}
+	if ids["one.example.com"] != 41 || ids["two.example.com"] != 42 {
+		t.Fatalf("unexpected domain ids: %+v", ids)
+	}
+	if s.Seq != 42 || len(s.Certs) != 2 {
+		t.Fatalf("unexpected state after issuance: seq=%d certs=%+v", s.Seq, s.Certs)
+	}
+	for index, cert := range s.Certs {
+		if cert.ID != 41+index || len(cert.Domains) != 1 || cert.Domains[0] != in.Domains[index] {
+			t.Fatalf("certificate %d lost input ordering: %+v", index, cert)
+		}
+		if cert.Name == "" || !strings.Contains(cert.Name, strings.TrimSuffix(in.Domains[index], ".com")) {
+			t.Fatalf("certificate %d has unexpected generated name %q", index, cert.Name)
+		}
+	}
+}
+
+func TestIssueIsolatedACMECertsRollsBackBatch(t *testing.T) {
+	s := &store.State{Seq: 7, Certs: []store.Cert{{ID: 3, Name: "existing"}}}
+	in := acmeRequest{Domains: []string{"one.example.com", "two.example.com", "three.example.com"}, Challenge: "dns"}
+	removed := []int{}
+
+	ids, err := issueIsolatedACMECerts(s, in, func(certificates []*store.Cert, _ store.Settings) []error {
+		errs := make([]error, len(certificates))
+		errs[1] = errors.New("provider rejected request")
+		return errs
+	}, func(id int) { removed = append(removed, id) })
+	if err == nil || !strings.Contains(err.Error(), `domain "two.example.com"`) {
+		t.Fatalf("expected domain-specific batch error, got ids=%v err=%v", ids, err)
+	}
+	if s.Seq != 7 || len(s.Certs) != 1 || s.Certs[0].Name != "existing" {
+		t.Fatalf("state was not rolled back: seq=%d certs=%+v", s.Seq, s.Certs)
+	}
+	wantRemoved := []int{8, 9, 10}
+	if len(removed) != len(wantRemoved) {
+		t.Fatalf("removed ids = %v, want %v", removed, wantRemoved)
+	}
+	for index := range wantRemoved {
+		if removed[index] != wantRemoved[index] {
+			t.Fatalf("removed ids = %v, want %v", removed, wantRemoved)
+		}
 	}
 }

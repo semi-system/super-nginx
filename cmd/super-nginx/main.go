@@ -69,7 +69,7 @@ func main() {
 	log.Printf("super-nginx: nginx started (pid %d, conf %s)", sup.Pid(), sup.Conf)
 
 	go sc.Run()
-	go certs.RenewLoop(st, func() error { return engine.Apply(&st.S, sup, true) })
+	go certs.RenewLoop(st, func() error { return engine.ApplyCertChange(&st.S, sup) })
 	go serveUI(st, sup, sc)
 
 	sigs := make(chan os.Signal, 1)

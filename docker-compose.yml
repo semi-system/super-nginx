@@ -33,6 +33,10 @@ services:
       - ./data:/data
     tmpfs:
       - /tmp
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     read_only: true
     # environment:
     #   - IS_MS_ON=true   # global WAF default (per-host toggle in the UI overrides)

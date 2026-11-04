@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,6 +22,11 @@ func TestProxyHostRender(t *testing.T) {
 	}
 	if !strings.Contains(cg, "proxy_cache sn_cache_5;") || !strings.Contains(cg, "proxy_cache_valid 200 302 30s;") {
 		t.Fatalf("cache host missing location cache directives, got:\n%s", cg)
+	}
+	for _, want := range []string{"proxy_cache_lock on;", "proxy_cache_background_update on;", "proxy_cache_revalidate on;"} {
+		if !strings.Contains(cg, want) {
+			t.Fatalf("cache host missing %q, got:\n%s", want, cg)
+		}
 	}
 	// non-cache proxy host emits nothing cache-related
 	if strings.Contains(string(renderHTTP(&store.State{Hosts: []store.Host{{ID: 6, Type: "proxy", Domains: []string{"b"}, Target: "http://127.0.0.1:1", Enabled: true}}})), "proxy_cache") {
@@ -51,6 +58,8 @@ func TestLoadBalancerHostRender(t *testing.T) {
 	got := string(renderHTTP(s))
 	for _, want := range []string{
 		"upstream sn_lb_12 {",
+		"zone sn_lb_12 64k;",
+		"keepalive 64;",
 		"least_conn;",
 		"server app-1:3000 weight=3 max_fails=2 fail_timeout=15s;",
 		"server app-2:3000 weight=1 max_fails=1 fail_timeout=10s backup;",
@@ -60,11 +69,44 @@ func TestLoadBalancerHostRender(t *testing.T) {
 		"proxy_ssl_name backend.example.com;",
 		"proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;",
 		"proxy_ssl_protocols TLSv1.2 TLSv1.3;",
+		"proxy_http_version 1.1;",
+		"proxy_set_header Connection \"\";",
 		"proxy_cache sn_cache_12;",
+		"ssl_session_cache shared:SN_SSL:20m;",
+		"ssl_session_timeout 10m;",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("load balancer config missing %q, got:\n%s", want, got)
 		}
+	}
+}
+
+func TestRenderedTreeComparison(t *testing.T) {
+	left := t.TempDir()
+	right := t.TempDir()
+	for _, root := range []string{left, right} {
+		if err := os.Mkdir(filepath.Join(root, "conf.d"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "conf.d", "hosts.conf"), []byte("same"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	equal, err := treesEqual(left, right)
+	if err != nil || !equal {
+		t.Fatalf("identical trees: equal=%t err=%v", equal, err)
+	}
+	if err := os.WriteFile(filepath.Join(right, "conf.d", "hosts.conf"), []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	equal, err = treesEqual(left, right)
+	if err != nil || equal {
+		t.Fatalf("changed trees: equal=%t err=%v", equal, err)
+	}
+	equal, err = treesEqual(left, filepath.Join(t.TempDir(), "missing"))
+	if err != nil || equal {
+		t.Fatalf("missing tree: equal=%t err=%v", equal, err)
 	}
 }
 

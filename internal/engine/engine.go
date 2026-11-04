@@ -1,16 +1,21 @@
 // Package engine renders nginx config from state and applies it safely:
-// backup current rendered tree -> write new -> nginx -t -> reload, restoring
-// the backup when the test fails. nginx only re-reads config on SIGHUP, so
-// writing files never affects the running instance until Test passes.
+// render staging tree -> atomic directory swap -> nginx -t -> reload, restoring
+// the old tree when validation fails. nginx only re-reads config on SIGHUP, so
+// swapping files never affects the running instance until Test passes.
 package engine
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
+	"io"
+	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/morningstar-sudo/super-nginx/internal/stats"
 	"github.com/morningstar-sudo/super-nginx/internal/store"
@@ -20,14 +25,14 @@ import (
 const (
 	LiveDir  = "/data/nginx"
 	bakDir   = "/data/nginx.bak"
+	nextDir  = "/data/nginx.next"
 	CertsDir = "/data/certs"
 	WWWDir   = "/data/www"
 	// lego's HTTP-01 solver listens here during a challenge; every :8080
 	// server proxies /.well-known/acme-challenge/ to it.
 	ACMEPort = "8402"
 	// custom page for the catch-all server (Settings -> default site, "html")
-	defaultDir   = LiveDir + "/default"
-	defaultIndex = defaultDir + "/index.html"
+	defaultDir = LiveDir + "/default"
 )
 
 func CertPath(id int) (fullchain, privkey string) {
@@ -35,49 +40,103 @@ func CertPath(id int) (fullchain, privkey string) {
 	return filepath.Join(d, "fullchain.pem"), filepath.Join(d, "privkey.pem")
 }
 
-// Apply renders state into LiveDir and hot-reloads nginx. On any failure the
-// previous rendered tree is restored and the error (incl. nginx -t output)
-// is returned. Caller holds the store mutex.
+// Apply renders state into a staging tree and hot-reloads nginx. Unchanged
+// trees skip nginx -t and reload. Caller holds the store mutex.
 func Apply(s *store.State, sup *supervisor.Supervisor, reload bool) error {
-	_ = os.RemoveAll(bakDir)
-	if _, err := os.Stat(LiveDir); err == nil {
-		if err := os.CopyFS(bakDir, os.DirFS(LiveDir)); err != nil {
-			return fmt.Errorf("backup rendered config: %w", err)
+	return apply(s, sup, reload, false)
+}
+
+// ApplyCertChange forces nginx to validate and reload even when the rendered
+// config is unchanged. Certificate renewal changes PEM bytes, not config paths.
+func ApplyCertChange(s *store.State, sup *supervisor.Supervisor) error {
+	return apply(s, sup, true, true)
+}
+
+func apply(s *store.State, sup *supervisor.Supervisor, reload, forceReload bool) error {
+	started := time.Now()
+	renderStarted := time.Now()
+	_ = os.RemoveAll(nextDir)
+	if err := writeAt(s, nextDir); err != nil {
+		_ = os.RemoveAll(nextDir)
+		return err
+	}
+	renderDuration := time.Since(renderStarted)
+
+	compareStarted := time.Now()
+	same, err := treesEqual(nextDir, LiveDir)
+	compareDuration := time.Since(compareStarted)
+	if err != nil {
+		_ = os.RemoveAll(nextDir)
+		return fmt.Errorf("compare rendered config: %w", err)
+	}
+	if same {
+		_ = os.RemoveAll(nextDir)
+		if reload && !forceReload {
+			log.Printf("engine: config unchanged, apply skipped (render=%s compare=%s total=%s)", renderDuration, compareDuration, time.Since(started))
+			return nil
 		}
 	}
+
+	var swapDuration time.Duration
+	if !same {
+		swapStarted := time.Now()
+		_ = os.RemoveAll(bakDir)
+		hadLive := false
+		if _, statErr := os.Stat(LiveDir); statErr == nil {
+			hadLive = true
+			if err := os.Rename(LiveDir, bakDir); err != nil {
+				_ = os.RemoveAll(nextDir)
+				return fmt.Errorf("stage rendered config backup: %w", err)
+			}
+		} else if !os.IsNotExist(statErr) {
+			_ = os.RemoveAll(nextDir)
+			return fmt.Errorf("stat rendered config: %w", statErr)
+		}
+		if err := os.Rename(nextDir, LiveDir); err != nil {
+			if hadLive {
+				_ = os.Rename(bakDir, LiveDir)
+			}
+			return fmt.Errorf("activate staged config: %w", err)
+		}
+		swapDuration = time.Since(swapStarted)
+	}
+
 	restore := func() {
+		if same {
+			return
+		}
 		_ = os.RemoveAll(LiveDir)
 		if _, err := os.Stat(bakDir); err == nil {
 			_ = os.Rename(bakDir, LiveDir)
 		}
 	}
-
-	if err := write(s); err != nil {
-		restore()
-		return err
-	}
+	testStarted := time.Now()
 	if err := sup.Test(); err != nil {
 		restore()
 		return err
 	}
-	_ = os.RemoveAll(bakDir)
+	testDuration := time.Since(testStarted)
+
+	var reloadDuration time.Duration
 	if reload {
-		return sup.Reload()
+		reloadStarted := time.Now()
+		if err := sup.Reload(); err != nil {
+			restore()
+			return err
+		}
+		reloadDuration = time.Since(reloadStarted)
 	}
+	_ = os.RemoveAll(bakDir)
+	log.Printf("engine: apply complete (changed=%t forced=%t render=%s compare=%s swap=%s test=%s reload=%s total=%s)",
+		!same, forceReload, renderDuration, compareDuration, swapDuration, testDuration, reloadDuration, time.Since(started))
 	return nil
 }
 
-func write(s *store.State) error {
+func writeAt(s *store.State, root string) error {
 	for _, d := range []string{"conf.d", "mail.d", "stream.d", "htpasswd", "default"} {
-		dir := filepath.Join(LiveDir, d)
+		dir := filepath.Join(root, d)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
-		}
-		old, _ := filepath.Glob(filepath.Join(dir, "*"))
-		for _, f := range old {
-			if fi, err := os.Stat(f); err == nil && !fi.IsDir() {
-				_ = os.Remove(f)
-			}
 		}
 	}
 	for _, al := range s.AccessLists {
@@ -88,7 +147,7 @@ func write(s *store.State) error {
 		for _, u := range al.Users {
 			fmt.Fprintf(b, "%s:%s\n", u.Username, u.Hash)
 		}
-		if err := os.WriteFile(htpasswdPath(al.ID), b.Bytes(), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "htpasswd", fmt.Sprint(al.ID)), b.Bytes(), 0o600); err != nil {
 			return err
 		}
 	}
@@ -101,14 +160,72 @@ func write(s *store.State) error {
 		}
 	}
 	if s.Settings.DefaultAction == "html" {
-		if err := os.WriteFile(defaultIndex, []byte(s.Settings.DefaultHTML), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "default", "index.html"), []byte(s.Settings.DefaultHTML), 0o644); err != nil {
 			return err
 		}
 	}
-	if err := os.WriteFile(filepath.Join(LiveDir, "conf.d", "hosts.conf"), renderHTTP(s), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "conf.d", "hosts.conf"), renderHTTP(s), 0o644); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(LiveDir, "stream.d", "streams.conf"), renderStream(s), 0o644)
+	return os.WriteFile(filepath.Join(root, "stream.d", "streams.conf"), renderStream(s), 0o644)
+}
+
+func treeDigest(root string) ([sha256.Size]byte, error) {
+	h := sha256.New()
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if _, err := io.WriteString(h, rel+"\x00"); err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			_, err = io.WriteString(h, "d\x00")
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(h, "f:%o\x00", info.Mode().Perm()); err != nil {
+			return err
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(h, file)
+		closeErr := file.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeErr
+	})
+	if err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	var digest [sha256.Size]byte
+	copy(digest[:], h.Sum(nil))
+	return digest, nil
+}
+
+func treesEqual(left, right string) (bool, error) {
+	leftDigest, err := treeDigest(left)
+	if err != nil {
+		return false, err
+	}
+	rightDigest, err := treeDigest(right)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return leftDigest == rightDigest, nil
 }
 
 func htpasswdPath(id int) string {
@@ -146,6 +263,9 @@ func statsLog(id int) string {
 func renderHTTP(s *store.State) []byte {
 	b := &bytes.Buffer{}
 	fmt.Fprint(b, "# generated by super-nginx — do not edit; source of truth is /data/db/state.json\n\n")
+	// Shared TLS sessions avoid a full handshake when clients reconnect. The
+	// cache is shared by workers and all TLS virtual hosts.
+	fmt.Fprint(b, "ssl_session_cache shared:SN_SSL:20m;\nssl_session_timeout 10m;\n\n")
 	fmt.Fprint(b, "map $http_upgrade $sn_connection {\n    default upgrade;\n    ''      close;\n}\n")
 	// payload for the stats collector — see stats.parse
 	fmt.Fprint(b, "log_format sn_stats '$sn_hid $status $bytes_sent $request_time';\n")
@@ -215,6 +335,9 @@ func upstreamName(id int) string { return fmt.Sprintf("sn_lb_%d", id) }
 
 func writeUpstream(b *bytes.Buffer, h store.Host) {
 	fmt.Fprintf(b, "\nupstream %s {\n", upstreamName(h.ID))
+	// Share passive health/load-balancing state across workers and retain hot
+	// backend connections per worker.
+	fmt.Fprintf(b, "    zone %s 64k;\n    keepalive 64;\n", upstreamName(h.ID))
 	switch h.LoadBalance {
 	case "least_conn":
 		fmt.Fprint(b, "    least_conn;\n")
@@ -389,12 +512,14 @@ func writeContent(b *bytes.Buffer, s *store.State, h store.Host) {
 		} else {
 			fmt.Fprintf(b, "        proxy_pass %s;\n", h.Target)
 		}
-		fmt.Fprint(b, "        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n")
+		fmt.Fprint(b, "        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n")
 		if h.Websocket {
-			fmt.Fprint(b, "        proxy_http_version 1.1;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection $sn_connection;\n")
+			fmt.Fprint(b, "        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection $sn_connection;\n")
+		} else {
+			fmt.Fprint(b, "        proxy_set_header Connection \"\";\n")
 		}
 		if cacheEnabled(h) {
-			fmt.Fprintf(b, "        proxy_cache %s;\n        proxy_cache_valid 200 302 %s;\n        proxy_cache_valid 404 1m;\n        proxy_cache_use_stale error timeout updating;\n        add_header X-Cache-Status $upstream_cache_status;\n",
+			fmt.Fprintf(b, "        proxy_cache %s;\n        proxy_cache_lock on;\n        proxy_cache_background_update on;\n        proxy_cache_revalidate on;\n        proxy_cache_valid 200 302 %s;\n        proxy_cache_valid 404 1m;\n        proxy_cache_use_stale error timeout updating;\n        add_header X-Cache-Status $upstream_cache_status;\n",
 				cacheZone(h.ID), cacheTime(h))
 		}
 		if h.LocationSnippet != "" {
