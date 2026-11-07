@@ -181,7 +181,8 @@ func (p *sharedHTTPProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
-	_, _ = w.Write([]byte(entry.keyAuth))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(w, r, "", time.Time{}, strings.NewReader(entry.keyAuth))
 }
 
 func loadUser(email string, staging bool) (*lego.Client, *acmeUser, error) {

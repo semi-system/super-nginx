@@ -24,6 +24,12 @@ func TestSharedHTTPProviderRoutesByDomainAndToken(t *testing.T) {
 	if response.Code != http.StatusOK || response.Body.String() != "auth-one" {
 		t.Fatalf("matching challenge response = %d %q", response.Code, response.Body.String())
 	}
+	if got := response.Header().Get("Content-Type"); got != "text/plain" {
+		t.Fatalf("challenge Content-Type = %q, want text/plain", got)
+	}
+	if got := response.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("challenge X-Content-Type-Options = %q, want nosniff", got)
+	}
 
 	request = httptest.NewRequest(http.MethodGet, "http://two.example.com/.well-known/acme-challenge/token-one", nil)
 	response = httptest.NewRecorder()

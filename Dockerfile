@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Local build against a local base tag:
 #   docker build --build-arg BASE_IMAGE=nginx-distroless:stream-test -t super-nginx .
-ARG BASE_IMAGE=ghcr.io/morningstar-sudo/nginx-distroless:latest
+ARG BASE_IMAGE=ghcr.io/semi-system/nginx-distroless:latest
 
 FROM node:22-alpine AS frontend
 WORKDIR /web
